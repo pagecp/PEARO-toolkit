@@ -2,13 +2,13 @@
 
 *(MPM,  7 août 2026)*
 
-Le code  PEARO est sur mon `$HOME` de Belenos: `/home/ext/cf/cglo/moinemp/SAVE/PEARO`
+Le code PEARO-toolkit est installé sur mon `$HOME` de Belenos: `/home/ext/cf/cglo/moinemp/SAVE/PEARO-toolkit`
 
 Pour le faire tourner sur un autre compte utilisateur, il suffit de le copier:
 
 ```bash
 cd $HOME/SAVE
-rsync -av /home/ext/cf/cglo/moinemp/SAVE/PEARO .
+rsync -av /home/ext/cf/cglo/moinemp/SAVE/PEARO-toolkit .
 ```
 
 Son contenu:
@@ -228,14 +228,14 @@ mamba env create -f env_pearo.yaml -vv
 
 ```bash
 mamba activate /home/ext/cf/cglo/moinemp/SAVE/miniforge3/pearo_env
-cd $HOME/SAVE/PEARO
+cd $HOME/SAVE/PEARO-toolkit
 ./run_over_all_days.sh
 ```
 
 On peut choisir de bypasser le rapatriement des données depuis Hendrix (intéressant dans le cas où il a déjà été fait). Pour ce faire:
 
 ```bash
-cd $HOME/SAVE/PEARO
+cd $HOME/SAVE/PEARO-tool
 ./run_over_all_days.sh 0
 ```
 
