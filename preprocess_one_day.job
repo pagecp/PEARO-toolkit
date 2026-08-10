@@ -1,0 +1,27 @@
+#!/bin/bash
+#SBATCH --job-name=preprocess_PEARO
+#SBATCH --partition=normal256
+#SBATCH --time=01:00:00
+#SBATCH --output=logs/preprocess_PEARO_%j.out
+#SBATCH --error=logs/preprocess_PEARO_%j.err
+
+set -euoxv pipefail
+
+DAY_FMT="$1"
+DATA_INDIR="$2"
+DATA_OUTDIR="$3"
+
+SCRIPT_DIR="$SLURM_SUBMIT_DIR"
+echo "$0: SCRIPT_DIR: $SCRIPT_DIR"
+CONFIG_DIR=$SCRIPT_DIR/config_input
+
+echo "Preprocessing $DAY_FMT"
+
+# activate PEARO dedicated virtual environement
+source /home/ext/cf/cglo/moinemp/SAVE/miniforge3/etc/profile.d/conda.sh
+conda activate pearo_env
+
+# preprocessing
+python $SCRIPT_DIR/compute_tasmax.py --day_tag $DAY_FMT --orig_datadir $DATA_INDIR --prepro_datadir $DATA_OUTDIR --nb_members 16
+
+echo "Prepocessing done for $DAY_FMT"

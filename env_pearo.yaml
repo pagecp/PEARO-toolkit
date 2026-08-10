@@ -1,0 +1,12 @@
+name: pearo_env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - xarray
+  - dask
+  - netcdf4
+  - cfgrib
+  - eccodes
+  - pip
+prefix: $HOME/SAVE/miniforge3/envs/pearo_env

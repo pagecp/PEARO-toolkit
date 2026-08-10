@@ -1,0 +1,17 @@
+#!/bin/bash
+#SBATCH --job-name=send_PEARO
+#SBATCH --partition=transfert
+#SBATCH --time=00:10:00
+#SBATCH --output=logs/send_PEARO_%j.out
+#SBATCH --error=logs/send_PEARO_%j.err
+
+set -euoxv pipefail
+
+DATA_OUTDIR=$1
+CFX_HOST=$2
+CFX_USER=$3
+CFX_DESTDIR=$4
+
+cd $DATA_OUTDIR
+ssh $CFX_USER@$CFX_HOST "mkdir -p $CFX_DESTDIR"
+rsync -av *.nc $CFX_USER@$CFX_HOST:/$CFX_DESTDIR/.

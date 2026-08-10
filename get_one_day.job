@@ -1,0 +1,34 @@
+#!/bin/bash
+#SBATCH --job-name=transfer_PEARO
+#SBATCH --partition=transfert
+#SBATCH --time=02:00:00
+#SBATCH --output=logs/transfer_PEARO_%j.out
+#SBATCH --error=logs/transfer_PEARO_%j.err
+
+set -euoxv pipefail
+
+DAY_FMT="$1"
+DATA_INDIR="$2"
+
+SCRIPT_DIR="$SLURM_SUBMIT_DIR"
+echo "$0: SCRIPT_DIR: $SCRIPT_DIR"
+CONFIG_DIR=$SCRIPT_DIR/config_input
+
+echo "Transfer data for $DAY_FMT"
+
+cd $DATA_INDIR
+
+while read rem_file loc_file
+do
+    # rapatriement en séquentiel des fichiers horaires du jour
+    ftget $rem_file $DATA_INDIR/$loc_file
+done < $CONFIG_DIR/lof_${DAY_FMT}.txt
+
+cd $SCRIPT_DIR
+
+echo "Transfer done for $DAY_FMT"
+
+# jid_prepro=$(sbatch --parsable preprocess_one_day.job "$DAY_FMT")
+# ###sbatch --dependency=afterok:$SLURM_JOB_ID preprocess_one_day.job "$DAY_FMT"
+
+# echo "Submitted preprocessing job $jid_prepro for $DAY_FMT"

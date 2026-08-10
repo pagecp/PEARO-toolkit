@@ -1,0 +1,81 @@
+#!/usr/bin/expect -f
+
+# =========================
+# Paramètres
+# =========================
+set timeout 300
+set file [lindex $argv 0]
+
+if { $file == "" } {
+    puts "[ERROR] Aucun fichier fourni"
+    exit 1
+}
+
+# =========================
+# Logging
+# =========================
+set timestamp [clock format [clock seconds] -format "%Y%m%d_%H%M%S"]
+set logfile "stage_${timestamp}.log"
+
+log_file -a $logfile # stage_YYYYMMDD_HHMMSS.log
+log_user 1 # pour affichage dans slurm-XXXX.out
+
+proc log_info {msg} {
+    set t [clock format [clock seconds] -format "%Y-%m-%d %H:%M:%S"]
+    puts "[INFO]  $t  $msg"
+}
+
+proc log_error {msg} {
+    set t [clock format [clock seconds] -format "%Y-%m-%d %H:%M:%S"]
+    puts "[ERROR] $t  $msg"
+}
+
+log_info "Lancement du script de staging."
+log_info "Fichier à stager: $file"
+
+# =========================
+# Connexion hshell
+# =========================
+spawn hshell
+
+# Attente directe du prompt (pas de login interactif)
+expect {
+    -re {[$#>] $} {
+        log_info "Connexion réussie."
+    }
+    timeout {
+        log_error "Impossible d'obtenir le prompt Hendrix"
+        exit 1
+    }
+}
+
+# =========================
+# Environnement (si besoin)
+# =========================
+#send "source ~/.bashrc\r"
+#expect -re {[$#>] $}
+
+# =========================
+# Stage
+# =========================
+log_info "Début de stage."
+send "stage $file\r"
+
+expect {
+    -re {[$#>] $} {
+        log_info "Fin de stage."
+    }
+    timeout {
+        log_error "Timeout pendant le stage."
+        exit 1
+    }
+}
+
+# =========================
+# Déconnexion
+# =========================
+send "exit\r"
+expect eof
+
+log_info "Fin du script de staging."
+exit 0
