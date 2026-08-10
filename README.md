@@ -19,8 +19,8 @@ Son contenu:
 └── run_over_all_days.sh
 ├── get_one_day.job
 ├── preprocess_one_day.job
-├── send_one_day.job
 ├── compute_tasmax.py
+├── send_one_day.job
 ├── logs/
 ├── draft/
 ```
