@@ -15,13 +15,14 @@ Son contenu:
 
 ```text
 ├── README.md
-├── compute_tasmax.py
 ├── config_input/
-├── draft/
-├── get_one_day.job
-├── logs/
-├── preprocess_one_day.job
 └── run_over_all_days.sh
+├── get_one_day.job
+├── preprocess_one_day.job
+├── send_one_day.job
+├── compute_tasmax.py
+├── logs/
+├── draft/
 ```
 
 Les données d'origine qui seront rapatriées depuis Hendrix et les données préprocessées qui seront générées (calcul de tasmax) se trouveront sur le `$WORKDIR` de l'utilsateur sur Belenos, ex. `/scratch/work/moinemp/PEARO_data`, respectivement sous:
