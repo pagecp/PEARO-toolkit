@@ -1,8 +1,9 @@
-import xarray as xr
-import numpy as np
-from datetime import datetime, timedelta
-
 import argparse
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import xarray as xr
 
 parser = argparse.ArgumentParser()
 
@@ -20,9 +21,10 @@ print(f"  - prepro_datadir: {args.prepro_datadir}")
 print(f"  - nb_members: {args.nb_members}")
 
 FIX_STAMP = "grid.arome-forecast.eurw1s40+00"
+DAY_HOURS = range(12, 24)
+CHUNKS = {"latitude": 200, "longitude": 200}
 
-# with open(args.infile_dates, "r") as f:
-#     dates = [line.strip() for line in f.readlines()]
+Path(args.prepro_datadir).mkdir(parents=True, exist_ok=True)
 
 for mbr in range(1, args.nb_members + 1):
     # lecture séquentielle des membres
@@ -31,8 +33,15 @@ for mbr in range(1, args.nb_members + 1):
     # exemple de nom de ficher d'origine: mb001_2022-08-11_grid.arome-forecast.eurw1s40+0013:00.grib
     hourly_data_files = [
         f"{args.orig_datadir}/{member_tag}_{args.day_tag}_{FIX_STAMP}{hour}:00.grib"
-        for hour in range(12, 24) # données diurnes
+        for hour in DAY_HOURS  # données diurnes
     ]
+
+    missing_files = [filepath for filepath in hourly_data_files if not Path(filepath).is_file()]
+    if missing_files:
+        raise FileNotFoundError(
+            f"{member_tag}: {len(missing_files)} fichier(s) horaire(s) manquant(s), "
+            f"ex. {missing_files[0]}"
+        )
 
     # ouverture lazy + multi-fichiers (tous les fichiers horaires pour un membres donné/un jour donné)
     ds = xr.open_mfdataset(
@@ -41,34 +50,41 @@ for mbr in range(1, args.nb_members + 1):
         combine="nested",
         concat_dim="step",  # ou "time" selon cfgrib
         parallel=True,
-        chunks={"latitude": 200, "longitude": 200},
+        chunks=CHUNKS,
         backend_kwargs={
             "filter_by_keys": {
-                "stepType": "instant", # et non pas "max" (uniquement la variable ptype - précip?- dispo en max pour surface)
+                "stepType": "instant",  # et non pas "max" (uniquement la variable ptype - précip?- dispo en max pour surface)
                 "typeOfLevel": "surface"
-                #"stepType": "max",
-                #"typeOfLevel": "heightAboveGround"
             }
         }
     )
 
-    # max journalier (diurne) de la température (variable "t") de surface
-    ds = ds["t"].max(dim="step") # ou "time" selon cfgrib
+    try:
+        if "t" not in ds:
+            raise KeyError(f"{member_tag}: variable 't' absente du GRIB")
 
-    # ajouter une dimension temps propre
-    ds = ZeroDivisionError.expand_dims(time=[np.datetime64(args.day_tag)])
+        # max journalier (diurne) de la température de surface
+        tasmax = (
+            ds["t"]
+            .max(dim="step")
+            .expand_dims(time=[np.datetime64(args.day_tag)])
+            .rename("tasmax")
+            .to_dataset()
+        )
 
-    # renommer la variable et ajouter des attributs
-    ds = ds.rename({"t": "tasmax"})
-    ds.attrs["title"] = "Daily maximum near-surface air temperature from PEARO"
-    ds.attrs["source"] = "PEARO (Météo-France)"
-    ds.attrs["history"] = f"Created on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} by compute_tasmax.py"
-    ds.attrs["author"] = "M-P. Moine (CERFACS)"
-    ds["tasmax"].attrs["long_name"] = "Daily maximum near-surface air temperature"
-    ds["tasmax"].attrs["standard_name"] = "air_temperature"
-    ds["tasmax"].attrs["units"] = "K"
+        tasmax.attrs["title"] = "Daily maximum near-surface air temperature from PEARO"
+        tasmax.attrs["source"] = "PEARO (Meteo-France)"
+        tasmax.attrs["history"] = f"Created on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} by compute_tasmax.py"
+        tasmax.attrs["author"] = "M-P. Moine (CERFACS)"
+        tasmax["tasmax"].attrs["long_name"] = "Daily maximum near-surface air temperature"
+        tasmax["tasmax"].attrs["standard_name"] = "air_temperature"
+        tasmax["tasmax"].attrs["units"] = "K"
 
-    ds.to_netcdf(f"{args.prepro_datadir}/tasmax_PEARO_{member_tag}_{args.day_tag}.nc") 
+        output_file = f"{args.prepro_datadir}/tasmax_PEARO_{member_tag}_{args.day_tag}.nc"
+        tasmax.to_netcdf(output_file)
+        print(f"{member_tag}: wrote {output_file}")
+    finally:
+        ds.close()
 
     # clefs possibles pour filter_by_keys pour les fichiers grib PEARO:
     #
@@ -84,4 +100,3 @@ for mbr in range(1, args.nb_members + 1):
     # filter_by_keys={'stepType': 'min', 'typeOfLevel': 'surface'}
     # filter_by_keys={'stepType': 'avg', 'typeOfLevel': 'surface'}
     # filter_by_keys={'stepType': 'max', 'typeOfLevel': 'surface'}
-

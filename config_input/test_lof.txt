@@ -1,0 +1,2 @@
+/home/m/mxpt/mxpt001/vortex/arome/pefrance/OPER/2022/08/11/T2100P/mb001/forecast/grid.arome-forecast.eurw1s40+0012:00.grib	mb001_2022-08-11_grid.arome-forecast.eurw1s40+0012:00.grib
+/home/m/mxpt/mxpt001/vortex/arome/pefrance/OPER/2022/08/11/T2100P/mb001/forecast/grid.arome-forecast.eurw1s40+0013:00.grib	mb001_2022-08-11_grid.arome-forecast.eurw1s40+0013:00.grib

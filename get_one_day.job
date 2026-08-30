@@ -16,15 +16,7 @@ CONFIG_DIR=$SCRIPT_DIR/config_input
 
 echo "Transfer data for $DAY_FMT"
 
-cd $DATA_INDIR
-
-while read rem_file loc_file
-do
-    # rapatriement en séquentiel des fichiers horaires du jour
-    ftget $rem_file $DATA_INDIR/$loc_file
-done < $CONFIG_DIR/lof_${DAY_FMT}.txt
-
-cd $SCRIPT_DIR
+"$SCRIPT_DIR/fetch_one_day.sh" "$CONFIG_DIR/lof_${DAY_FMT}.txt" "$DATA_INDIR"
 
 echo "Transfer done for $DAY_FMT"
 

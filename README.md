@@ -151,6 +151,12 @@ Le script `scan_file_list.sh` produit également le fichier`config_input/lof_day
 Avant de lancer le pipeline et rapatrier les données de la PEARO depuis Hendrix, 
 il faut faire un prestaging (i.e. remonter les fichiers du stockage bande au cache disk d'Hendrix).
 
+Point important issu de la doc hshell:
+* `stage -a -f listing` s'utilise dans `hshell` si le fichier `listing` est visible sur Hendrix.
+* `hstage -a -f listing` s'utilise depuis le shell Belenos si le fichier `listing` est local a Belenos.
+
+Dans notre cas, les fichiers `config_input/lof_YYYY-MM-DD.txt` et le listing fourni par Jade sous `/archive2/...` sont censes etre lus depuis Belenos. Il faut donc privilegier `hstage` et `hfstat`, pas `stage -f` dans `hshell`.
+
 Exemple, pour pré-stager les données PEARO du 2022-05-31 du membre 1, faire sur Belenos:
 
 ```bash
@@ -183,6 +189,50 @@ module load hpss/1.0
 hshell
 cd /home/m/mxpt/mxpt001/vortex/arome/pefrance/OPER/2022/05/31/T2100P/mb001/forecast
 stage -a mb*/forecast/*.grib
+```
+
+Pour automatiser le prestaging a partir d'un fichier `lof_YYYY-MM-DD.txt` du depot, utiliser:
+
+```bash
+module load hpss/1.0
+cd $HOME/SAVE/PEARO-toolkit
+./prestage_pearo.sh config_input/lof_2022-08-11.txt
+```
+
+Le script:
+* lit uniquement la 1ere colonne du fichier `lof_*` (chemins Hendrix)
+* soumet les demandes de prestaging par paquets avec `hstage -a -f`
+* verifie l'avancement avec `hfstat -f`
+* reboucle tant qu'il reste des fichiers `OFF` ou `STA`
+* garde un etat de reprise sous `logs/prestage_*`
+
+Exemples utiles:
+
+```bash
+# verifier uniquement un lot deja soumis
+./prestage_pearo.sh config_input/lof_2022-08-11.txt --verify-only
+
+# ajuster la taille des paquets et la frequence de polling
+./prestage_pearo.sh config_input/lof_2022-08-11.txt --chunk-size 500 --poll-seconds 300
+```
+
+## Rapatriement Hendrix vers Belenos
+
+Sur le compte `pagec` au 29 aout 2026:
+* sur `belenoslogin0`, `hstage`, `hfstat`, `hshell` sont disponibles apres `module load hpss/1.0`
+* sur un noeud `transfert`, `ftget`, `ftput` et `ftmotpasse` sont disponibles apres `module load hpss/1.0`
+* `ftmotpasse -h hendrix -u pagec` a permis de creer `~/.ftuas`
+
+Le job de transfert passe par `fetch_one_day.sh`, qui utilise `ftget` a partir du fichier `lof_YYYY-MM-DD.txt`.
+Il faut donc executer ce job sur la partition `transfert`, conformement a la doc FTserv.
+
+Test manuel conseille sur 1 ou 2 fichiers avant lancement massif:
+
+```bash
+module load hpss/1.0
+cd $HOME/SAVE/PEARO-toolkit
+ftmotpasse -h hendrix -u $USER
+./fetch_one_day.sh config_input/lof_2022-08-11.txt /scratch/work/$USER/PEARO_data/orig_data/2022-08-11
 ```
 
 ## Principe du pipeline d'exécution
@@ -246,7 +296,4 @@ cd $HOME/SAVE/PEARO-tool
 En lançant le run, la totalité des dates présentes dans `config_input/lof_days.txt` va être traitée. 
 
 Pour des tests rapides sur 1 jour par exemple, ou pour traiter d'autres dates, il suffit de modifier `lof_days.txt` (conseil: conserver une copie du fichier complet).
-
-
-
 
