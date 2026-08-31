@@ -297,3 +297,121 @@ En lançant le run, la totalité des dates présentes dans `config_input/lof_day
 
 Pour des tests rapides sur 1 jour par exemple, ou pour traiter d'autres dates, il suffit de modifier `lof_days.txt` (conseil: conserver une copie du fichier complet).
 
+## Configuration locale
+
+Ne pas mettre les infos sensibles dans git. Copier le fichier d'exemple:
+
+```bash
+cp config_input/pearo.env.example config_input/pearo.env
+```
+
+Puis remplir localement au minimum:
+* `PEARO_SEND_HOST`
+* `PEARO_SEND_USER`
+* `PEARO_SEND_DEST_ROOT`
+
+Les autres parametres utiles sont aussi centralises dans `config_input/pearo.env`:
+* emplacement des donnees scratch (`PEARO_DATA_ROOT`)
+* repertoire d'etat persistant (`PEARO_STATE_ROOT`)
+* env conda (`PEARO_CONDA_SH`, `PEARO_CONDA_ENV`)
+* nombre de membres (`PEARO_NB_MEMBERS`)
+
+Le fichier reel `config_input/pearo.env` est ignore par git.
+
+## Workflow long avec reprise
+
+Pour un run long et un scratch qui peut etre nettoye, utiliser:
+
+```bash
+cd $HOME/SAVE/PEARO-toolkit
+./run_streaming_pipeline.sh
+```
+
+Ce script:
+* traite les jours un par un
+* fait le prestaging avant chaque transfert
+* attend la fin du transfert, puis du preprocessing, puis de l'envoi
+* nettoie les GRIB du scratch apres succes
+* garde un etat de reprise hors scratch dans `PEARO_STATE_ROOT`
+
+En cas d'interruption, relancer simplement la meme commande: les jours deja termines sont sautes et les etapes manquantes sont reprises.
+
+## Procedure conseillee
+
+### 1. Preparer la config locale
+
+```bash
+cd $HOME/SAVE/PEARO-toolkit
+cp config_input/pearo.env.example config_input/pearo.env
+```
+
+Editer ensuite `config_input/pearo.env`:
+* mettre `PEARO_DO_SEND=0` pour un 1er test sans envoi
+* ajuster `PEARO_DAYS_FILE` si besoin
+* verifier `PEARO_NB_MEMBERS`
+
+Quand l'envoi Cerfacs est pret:
+* mettre `PEARO_DO_SEND=1`
+* renseigner `PEARO_SEND_HOST`
+* renseigner `PEARO_SEND_USER`
+* renseigner `PEARO_SEND_DEST_ROOT`
+
+### 2. Preparer l'environnement
+
+Sur Belenos:
+
+```bash
+source /home/ext/cf/cglo/moinemp/SAVE/miniforge3/etc/profile.d/conda.sh
+conda activate pearo_env
+module load hpss/1.0
+```
+
+Avant le 1er transfert Hendrix:
+
+```bash
+ftmotpasse -h hendrix -u $USER
+```
+
+### 3. Lancer le workflow
+
+```bash
+./run_streaming_pipeline.sh
+```
+
+Le script:
+* lance le prestaging depuis le login
+* soumet les transferts et envois sur la partition `transfert`
+* soumet le calcul sur `normal256`
+* attend chaque etape avec `sbatch --wait`
+
+### 4. Verifier l'etat
+
+Les marqueurs de reprise sont stockes sous:
+
+```bash
+$PEARO_STATE_ROOT/<YYYY-MM-DD>/
+```
+
+On y trouve par exemple:
+* `transfer.ok`
+* `preprocess.ok`
+* `send.ok`
+* `done.ok`
+
+### 5. Reprendre apres interruption
+
+Si le scratch est nettoye ou si la session est coupee, relancer simplement:
+
+```bash
+./run_streaming_pipeline.sh
+```
+
+Les jours deja termines seront sautes automatiquement.
+
+## Validation effectuee
+
+Tests realises sur Belenos et Hendrix au 31 aout 2026:
+* prestaging OK avec `hstage` et `hfstat`
+* transfert OK avec `ftget` sur noeud `transfert`
+* calcul OK sur les 16 membres pour le 2022-08-11
+* envoi Cerfacs OK avec `rsync` depuis un noeud `transfert` vers `elnino.cerfacs.fr`

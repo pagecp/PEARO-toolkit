@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,12 @@ print(f"  - nb_members: {args.nb_members}")
 FIX_STAMP = "grid.arome-forecast.eurw1s40+00"
 DAY_HOURS = range(12, 24)
 CHUNKS = {"latitude": 200, "longitude": 200}
+GRIB_FILTER = {
+    "stepType": "instant",
+    "typeOfLevel": "heightAboveGround",
+    "level": 2,
+    "paramId": 167,
+}
 
 Path(args.prepro_datadir).mkdir(parents=True, exist_ok=True)
 
@@ -51,21 +58,16 @@ for mbr in range(1, args.nb_members + 1):
         concat_dim="step",  # ou "time" selon cfgrib
         parallel=True,
         chunks=CHUNKS,
-        backend_kwargs={
-            "filter_by_keys": {
-                "stepType": "instant",  # et non pas "max" (uniquement la variable ptype - précip?- dispo en max pour surface)
-                "typeOfLevel": "surface"
-            }
-        }
+        backend_kwargs={"filter_by_keys": GRIB_FILTER},
     )
 
     try:
-        if "t" not in ds:
-            raise KeyError(f"{member_tag}: variable 't' absente du GRIB")
+        if "t2m" not in ds:
+            raise KeyError(f"{member_tag}: variable 't2m' absente du GRIB")
 
-        # max journalier (diurne) de la température de surface
+        # Max journalier (diurne) de la température de l'air à 2 m.
         tasmax = (
-            ds["t"]
+            ds["t2m"]
             .max(dim="step")
             .expand_dims(time=[np.datetime64(args.day_tag)])
             .rename("tasmax")
@@ -95,7 +97,7 @@ for mbr in range(1, args.nb_members + 1):
     # filter_by_keys={'typeOfLevel': 'nominalTop'}
     # filter_by_keys={'typeOfLevel': 'meanSea'}
     #
-    # filter_by_keys={'stepType': 'instant', 'typeOfLevel': 'surface'}
+    # filter_by_keys={'stepType': 'instant', 'typeOfLevel': 'heightAboveGround', 'level': 2, 'paramId': 167}
     # filter_by_keys={'stepType': 'accum', 'typeOfLevel': 'surface'}
     # filter_by_keys={'stepType': 'min', 'typeOfLevel': 'surface'}
     # filter_by_keys={'stepType': 'avg', 'typeOfLevel': 'surface'}

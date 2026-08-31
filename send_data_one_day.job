@@ -12,6 +12,10 @@ CFX_HOST=$2
 CFX_USER=$3
 CFX_DESTDIR=$4
 
+[ -n "$CFX_HOST" ] || { echo "ERROR: empty destination host" >&2; exit 1; }
+[ -n "$CFX_USER" ] || { echo "ERROR: empty destination user" >&2; exit 1; }
+[ -n "$CFX_DESTDIR" ] || { echo "ERROR: empty destination directory" >&2; exit 1; }
+
 cd $DATA_OUTDIR
 ssh $CFX_USER@$CFX_HOST "mkdir -p $CFX_DESTDIR"
 rsync -av *.nc $CFX_USER@$CFX_HOST:/$CFX_DESTDIR/.

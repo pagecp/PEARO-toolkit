@@ -14,14 +14,16 @@ DATA_OUTDIR="$3"
 SCRIPT_DIR="$SLURM_SUBMIT_DIR"
 echo "$0: SCRIPT_DIR: $SCRIPT_DIR"
 CONFIG_DIR=$SCRIPT_DIR/config_input
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/load_pearo_config.sh"
 
 echo "Preprocessing $DAY_FMT"
 
 # activate PEARO dedicated virtual environement
-source /home/ext/cf/cglo/moinemp/SAVE/miniforge3/etc/profile.d/conda.sh
-conda activate pearo_env
+source "$PEARO_CONDA_SH"
+conda activate "$PEARO_CONDA_ENV"
 
 # preprocessing
-python $SCRIPT_DIR/compute_tasmax.py --day_tag $DAY_FMT --orig_datadir $DATA_INDIR --prepro_datadir $DATA_OUTDIR --nb_members 16
+python $SCRIPT_DIR/compute_tasmax.py --day_tag $DAY_FMT --orig_datadir $DATA_INDIR --prepro_datadir $DATA_OUTDIR --nb_members "$PEARO_NB_MEMBERS"
 
 echo "Prepocessing done for $DAY_FMT"
