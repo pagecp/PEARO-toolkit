@@ -1,417 +1,251 @@
-# Pipeline PEARO pour Jade
+# Pipeline PEARO
 
-*(MPM,  7 août 2026)*
+*(Travail initial : MPM, 7 août 2026 ; workflow opérationnel complété en août 2026)*
 
-Le code PEARO-toolkit est installé sur mon `$HOME` de Belenos: `/home/ext/cf/cglo/moinemp/SAVE/PEARO-toolkit`
+Ce dépôt récupère des champs horaires PE-AROME depuis Hendrix, calcule un champ journalier de `tasmax` pour chaque membre, puis peut envoyer les fichiers NetCDF produits vers le Cerfacs.
 
-Pour le faire tourner sur un autre compte utilisateur, il suffit de le copier:
+## Quel workflow utiliser ?
 
-```bash
-cd $HOME/SAVE
-rsync -av /home/ext/cf/cglo/moinemp/SAVE/PEARO-toolkit .
-```
+Le workflow recommandé est `run_streaming_pipeline.sh`. Il traite les jours séquentiellement, conserve un état de reprise hors du scratch et peut reprendre après une interruption.
 
-Son contenu:
+| Usage | Commande ou script | Statut |
+| --- | --- | --- |
+| Traitement normal ou traitement long | `run_streaming_pipeline.sh` | **Recommandé** |
+| Pré-staging seul ou diagnostic | `prestage_pearo.sh` | Outil utilisé par le workflow, exécutable manuellement |
+| Transfert d'une journée | `fetch_one_day.sh` via `get_one_day.job` | Outil utilisé par le workflow |
+| Ancien lancement parallèle | `run_over_all_days.sh` | **Workflow historique de MPM**, conservé pour référence |
+| Commandes interactives `hshell`, `stage` et `fstat` | Exemples de diagnostic | **Manuel**, non nécessaire au workflow recommandé |
 
-```text
-├── README.md
-├── config_input/
-└── run_over_all_days.sh
-├── get_one_day.job
-├── preprocess_one_day.job
-├── compute_tasmax.py
-├── send_one_day.job
-├── logs/
-├── draft/
-```
+## Architecture du workflow recommandé
 
-Les données d'origine qui seront rapatriées depuis Hendrix et les données préprocessées qui seront générées (calcul de tasmax) se trouveront sur le `$WORKDIR` de l'utilsateur sur Belenos, ex. `/scratch/work/moinemp/PEARO_data`, respectivement sous:
+Le dépôt et sa configuration sont installés sur **Belenos**, dans un espace persistant tel que `$HOME/SAVE/PEARO-toolkit`. Hendrix sert uniquement de source pour les fichiers GRIB.
 
-```text
-├── orig_data/
-├── prepro_data/
-```
+Pour chaque date listée dans `PEARO_DAYS_FILE`, le workflow réalise les étapes suivantes :
 
-## Préparation de la liste des fichiers PEARO d'origine à utiliser
+1. pré-staging des GRIB depuis les bandes vers le cache disque Hendrix avec `hstage` et suivi avec `hfstat` ;
+2. transfert séquentiel des GRIB vers le scratch Belenos avec `ftget`, sur un nœud `transfert` ;
+3. lecture des champs horaires de température de l'air à 2 m et calcul de `tasmax` avec `compute_tasmax.py`, sur `normal256` ;
+4. envoi optionnel des NetCDF vers le Cerfacs avec `rsync`, sur un nœud `transfert` ;
+5. suppression optionnelle des GRIB temporaires après réussite.
 
-Cette étape est à faire en amont, une fois pour toutes.
+Le `tasmax` est actuellement calculé à partir des 12 échéances horaires `+0012:00` à `+0023:00`. Il ne correspond donc pas à un maximum calculé sur 24 heures.
 
-Liste des fichiers PEARO utiles fournie par Jade : `config_input/full_lof_to_get.txt`
+## Installation sur Belenos
 
-Elle contient 13800 fichiers dont:
-* 300 fichiers pour 2022/05
-* 5700 fichiers pour 2022/06
-* 4800 fichiers pour 2022/07
-* 3000 fichiers pour 2022/08
+Pour le moment, la source de référence est uniquement la branche `pagec/prestage-ftserv-t2m` du fork `pagecp/PEARO-toolkit`. Ne pas utiliser la branche principale du fork ni copier directement l'ancien dépôt de MPM : ils ne contiennent pas nécessairement le workflow opérationnel et ses dernières corrections.
 
-C'est 300 fichiers par jour (12 x 25 membres) et les 46 jours retenus sont:
-
-MAI 2022 (1 jour)
-```text
-2022/05/31 300
-```
-
-JUIN 2022 (19 jours)
-
-```text
-2022/06/01 300
-2022/06/02 300
-2022/06/03 300
-2022/06/10 300
-2022/06/11 300
-2022/06/12 300
-2022/06/13 300
-2022/06/14 300
-2022/06/15 300
-2022/06/16 300
-2022/06/17 300
-2022/06/18 300
-2022/06/19 300
-2022/06/21 300
-2022/06/24 300
-2022/06/25 300
-2022/06/26 300
-2022/06/28 300
-2022/06/29 300
-```
-
-JUILLET 2022 (16 jours)
-
-```text
-2022/07/01 300
-2022/07/02 300
-2022/07/10 300
-2022/07/11 300
-2022/07/12 300
-2022/07/13 300
-2022/07/14 300
-2022/07/15 300
-2022/07/16 300
-2022/07/17 300
-2022/07/18 300
-2022/07/19 300
-2022/07/20 300
-2022/07/21 300
-2022/07/22 300
-2022/07/23 300
-```
-
-AOUT (2022 10 jours)
-
-```text
-2022/08/01 300
-2022/08/02 300
-2022/08/03 300
-2022/08/08 300
-2022/08/09 300
-2022/08/10 300
-2022/08/11 300
-2022/08/12 300
-2022/08/16 300
-2022/08/17 300
-```
-
-*Pour info, 1 jour de données brutes horaires PEARO c'est 13.5 Go / membre, soit 337.5 Go pour les 25 membres; donc our les 46 jours séléctionnés par Jade ça fait 15.5 To.*
-
-*Rectification: il n'y a que 16 membres disponibles sur Hendrix, donc un volumétrie totale de 10 To.*
-
-On commence par générer des listes de fichiers PEARO exploitables (séparés par jour):
+Git n'étant pas nécessairement disponible ou configuré sur Belenos, mettre d'abord à jour une copie du fork sur une machine ayant accès à GitHub, par exemple `elnino` :
 
 ```bash
-cd config_input
-./scan_file_list.sh full_lof_to_get.txt
+cd /home/globc/page
+git clone --branch pagec/prestage-ftserv-t2m --single-branch \
+  https://github.com/pagecp/PEARO-toolkit.git PEARO-toolkit
+cd PEARO-toolkit
 ```
 
-Ceci génère des fichiers du type `config_input/lof_2022-08-02.txt` contenant des lignes du style:
+Si la copie existe déjà sur `elnino`, la mettre à jour avec :
+
+```bash
+cd /home/globc/page/PEARO-toolkit
+git switch pagec/prestage-ftserv-t2m
+git pull --ff-only origin pagec/prestage-ftserv-t2m
+```
+
+Depuis un nœud `transfert` de Belenos, copier ensuite cette version dans l'espace persistant de l'utilisateur :
+
+```bash
+mkdir -p "$HOME/SAVE/PEARO-toolkit"
+rsync -av page@elnino.cerfacs.fr:/home/globc/page/PEARO-toolkit/ \
+  "$HOME/SAVE/PEARO-toolkit/"
+cd "$HOME/SAVE/PEARO-toolkit"
+```
+
+Cette copie contient le répertoire `.git`, mais aucune commande Git n'est nécessaire sur Belenos pour exécuter le workflow.
+
+Les données temporaires sont placées par défaut sous :
 
 ```text
-/home/m/mxpt/mxpt001/vortex/arome/pefrance/OPER/2022/08/02/T2100P/mb001/forecast/grid.arome-forecast.eurw1s40+0012:00.grib	mb001_2022-08-02_grid.arome-forecast.eurw1s40+0012:00.grib
-/home/m/mxpt/mxpt001/vortex/arome/pefrance/OPER/2022/08/02/T2100P/mb001/forecast/grid.arome-forecast.eurw1s40+0013:00.grib	mb001_2022-08-02_grid.arome-forecast.eurw1s40+0013:00.grib
-/home/m/mxpt/mxpt001/vortex/arome/pefrance/OPER/2022/08/02/T2100P/mb001/forecast/grid.arome-forecast.eurw1s40+0014:00.grib	mb001_2022-08-02_grid.arome-forecast.eurw1s40+0014:00.grib
+$WORKDIR/PEARO_data/
+├── orig_data/     # GRIB transférés depuis Hendrix
+└── prepro_data/   # NetCDF journaliers de tasmax
 ```
 
-Le 1er champ sur chaque ligne est le path du fichier PEARO horaire sur Hendrix, le second le nom qu'il prendra après rapatriement local sous `orig_data/2022-08-02`. 
+## Prérequis
 
-L'utilsateur n'a pas à se préoccuper de ce rangement, il se fait automatiquement. 
+### Accès Hendrix et FTserv
 
-Ces fichiers `config_input/lof_YYYY-MM-DD.txt` ne sont utile que pour le rapatriement des données Hendrix.
-
-Le script `scan_file_list.sh` produit également le fichier`config_input/lof_days.txt` listant les dates à traiter, du style:
-
-```text
-2022-05-31
-2022-06-01
-2022-06-02
-```
-
-*AMELIORATION-1: Ce préprocessing de la  grande liste initiale `full_lof_to_get.txt`  pourrait être évité. On peut spécifier les choses dans l'autre sens: l'utilsateur définit les date-jours qu'il veut exploirer (`lof_days.txt`), le nombre de membres qu'il veut utiliser (`nb_members`) et un petit script construit les listes de fichiers horaires pour chaque jour (`lof_YYYY-MM-DD.txt`).*
-
-## Prestaging des fichiers sur hendrix
-
-Avant de lancer le pipeline et rapatrier les données de la PEARO depuis Hendrix, 
-il faut faire un prestaging (i.e. remonter les fichiers du stockage bande au cache disk d'Hendrix).
-
-Point important issu de la doc hshell:
-* `stage -a -f listing` s'utilise dans `hshell` si le fichier `listing` est visible sur Hendrix.
-* `hstage -a -f listing` s'utilise depuis le shell Belenos si le fichier `listing` est local a Belenos.
-
-Dans notre cas, les fichiers `config_input/lof_YYYY-MM-DD.txt` et le listing fourni par Jade sous `/archive2/...` sont censes etre lus depuis Belenos. Il faut donc privilegier `hstage` et `hfstat`, pas `stage -f` dans `hshell`.
-
-Exemple, pour pré-stager les données PEARO du 2022-05-31 du membre 1, faire sur Belenos:
+Sur Belenos, charger les outils Hendrix :
 
 ```bash
 module load hpss/1.0
-hshell
-cd /home/m/mxpt/mxpt001/vortex/arome/pefrance/OPER/2022/05/31/T2100P/mb001/forecast
-stage -a *.grib
 ```
 
-La commande hshell nous connecte sur Hendrix.
-
-La commande  `stage -a` (assychrone) rend la main, et il faut attendre que tous les fichiers soient sur le cache (passage du statut `OFF` à `ONL`). Pour vérifier ça:
+Avant le premier transfert, initialiser l'authentification FTserv :
 
 ```bash
-fstat *.grib
-````
-```text
-2026-08-07 15:09:07 1417761 normal : grid.arome-forecast.eurw1s40+0016:00.grib: ONL(2) (245324294) (1.92%)
-2026-08-07 15:09:07 1417761 normal : grid.arome-forecast.eurw1s40+0008:00.grib: ONL(2) (243663319) (3.85%)
-2026-08-07 15:09:07 1417761 normal : grid.arome-forecast.eurw1s40+0002:00.grib: ONL(2) (250163567) (5.77%)
-2026-08-07 15:09:07 1417761 normal : grid.arome-forecast.eurw1s40+0017:00.grib: ONL(2) (245676297) (7.69%)
+ftmotpasse -h hendrix -u "$USER"
 ```
 
-Si le statut `STA` s'affiche pour certains fichiers, c'est que le prestaging est en cours.
+`hstage` et `hfstat` sont disponibles depuis le nœud de login. `ftget`, `ftput` et `ftmotpasse` doivent être utilisés sur un nœud de la partition `transfert` ; le workflow soumet automatiquement les jobs sur cette partition.
 
-Pour pré-stager les 25 membres d'un coup:
+### Environnement Conda
 
-```bash
-module load hpss/1.0
-hshell
-cd /home/m/mxpt/mxpt001/vortex/arome/pefrance/OPER/2022/05/31/T2100P/mb001/forecast
-stage -a mb*/forecast/*.grib
-```
-
-Pour automatiser le prestaging a partir d'un fichier `lof_YYYY-MM-DD.txt` du depot, utiliser:
-
-```bash
-module load hpss/1.0
-cd $HOME/SAVE/PEARO-toolkit
-./prestage_pearo.sh config_input/lof_2022-08-11.txt
-```
-
-Le script:
-* lit uniquement la 1ere colonne du fichier `lof_*` (chemins Hendrix)
-* soumet les demandes de prestaging par paquets avec `hstage -a -f`
-* verifie l'avancement avec `hfstat -f`
-* reboucle tant qu'il reste des fichiers `OFF` ou `STA`
-* garde un etat de reprise sous `logs/prestage_*`
-
-Exemples utiles:
-
-```bash
-# verifier uniquement un lot deja soumis
-./prestage_pearo.sh config_input/lof_2022-08-11.txt --verify-only
-
-# ajuster la taille des paquets et la frequence de polling
-./prestage_pearo.sh config_input/lof_2022-08-11.txt --chunk-size 500 --poll-seconds 300
-```
-
-## Rapatriement Hendrix vers Belenos
-
-Sur le compte `pagec` au 29 aout 2026:
-* sur `belenoslogin0`, `hstage`, `hfstat`, `hshell` sont disponibles apres `module load hpss/1.0`
-* sur un noeud `transfert`, `ftget`, `ftput` et `ftmotpasse` sont disponibles apres `module load hpss/1.0`
-* `ftmotpasse -h hendrix -u pagec` a permis de creer `~/.ftuas`
-
-Le job de transfert passe par `fetch_one_day.sh`, qui utilise `ftget` a partir du fichier `lof_YYYY-MM-DD.txt`.
-Il faut donc executer ce job sur la partition `transfert`, conformement a la doc FTserv.
-
-Test manuel conseille sur 1 ou 2 fichiers avant lancement massif:
-
-```bash
-module load hpss/1.0
-cd $HOME/SAVE/PEARO-toolkit
-ftmotpasse -h hendrix -u $USER
-./fetch_one_day.sh config_input/lof_2022-08-11.txt /scratch/work/$USER/PEARO_data/orig_data/2022-08-11
-```
-
-## Principe du pipeline d'exécution
-
-Ce pipeline va traiter chaque jour de PEARO: 
-1. rapatriement de toutes les données horaires du jour au format natif GRIB
-2. lecture de tous les fchiers GRIB du jour et calcul de la tasmax sur les 12h de données diurne et  sauvegarde des résultats au format NETCDF
-3. envoi des fichiers de tasmax au Cerfacs
-4. ménage des fichiers d'origine
-
-Et ce pour chacun des membres de la prévi d'ensemble.
-
-Techniquement l'enchaînement est le suivant:
-
-`run_over_all_days.sh` lance `get_one_day.job` puis (en cas de succès seulement) `preprocess_one_day.job`. Ce dernier lance le script python `compute_tasmax.py`. Enfin, si le caclul a réussit, `send_one_day.job` envoi les données préprocessées (tasmax) au Cerfacs.
-
-Les scripts `.job` sont des jobs SLURM:
-*  `get_one_day.job` est lancé sur la partition `transfer` de Belenos 
-* `preprocess_one_day.job` sur la partition `normal256`
-
-Les couples de jobs (`get_one_day.job`, `preprocess_one_day.job`) sont lancés en parallèle pour chaque jour traité.
-
-## Installation de l'environnement mamba pour PEARO (seulement MPM)
-
-La création d'un environnement spécipique est nécessaire, notamment pour avoir le package `cfgrid` qui n'est pas dispo sur Belenos.
-
-```bash
-# Purge modules
-module purge
-# Certificates
-export CURL_CA_BUNDLE="/opt/softs/certificats/proxy1_1.pem"
-export REQUESTS_CA_BUNDLE="/opt/softs/certificats/proxy1_1.pem"
-export GIT_SSL_CAINFO="/opt/softs/certificats/proxy1_1.pem"
-# Install Minoforge3
-cd SAVE
-./Miniforge3-Linux-x86_64.sh # à faire une seul fois pour installer la miniforge3
-source /home/ext/cf/cglo/moinemp/SAVE/miniforge3/etc/profile.d/conda.sh
-# Create mamba env
-cd PEARO
-mamba env create -f env_pearo.yaml -vv
-```
-
-## Exemple d'appel 
-
-```bash
-mamba activate /home/ext/cf/cglo/moinemp/SAVE/miniforge3/pearo_env
-cd $HOME/SAVE/PEARO-toolkit
-./run_over_all_days.sh
-```
-
-On peut choisir de bypasser le rapatriement des données depuis Hendrix (intéressant dans le cas où il a déjà été fait). Pour ce faire:
-
-```bash
-cd $HOME/SAVE/PEARO-tool
-./run_over_all_days.sh 0
-```
-
-*AMELIORATION-2: il faudrait pouvoir faire ce bypass selon les date traitées, ce qui n'est pas le cas, pour l'isntant c'est tout ou rien. Dans l'idéal même, faire une détection automatique des fichiers déjà rapatriés et compléter (MAJ dynamique des fichiers `lof_YYYY-MM-DD.txt`)*
-
-
-En lançant le run, la totalité des dates présentes dans `config_input/lof_days.txt` va être traitée. 
-
-Pour des tests rapides sur 1 jour par exemple, ou pour traiter d'autres dates, il suffit de modifier `lof_days.txt` (conseil: conserver une copie du fichier complet).
-
-## Configuration locale
-
-Ne pas mettre les infos sensibles dans git. Copier le fichier d'exemple:
-
-```bash
-cp config_input/pearo.env.example config_input/pearo.env
-```
-
-Puis remplir localement au minimum:
-* `PEARO_SEND_HOST`
-* `PEARO_SEND_USER`
-* `PEARO_SEND_DEST_ROOT`
-
-Les autres parametres utiles sont aussi centralises dans `config_input/pearo.env`:
-* emplacement des donnees scratch (`PEARO_DATA_ROOT`)
-* repertoire d'etat persistant (`PEARO_STATE_ROOT`)
-* env conda (`PEARO_CONDA_SH`, `PEARO_CONDA_ENV`)
-* nombre de membres (`PEARO_NB_MEMBERS`)
-
-Le fichier reel `config_input/pearo.env` est ignore par git.
-
-## Workflow long avec reprise
-
-Pour un run long et un scratch qui peut etre nettoye, utiliser:
-
-```bash
-cd $HOME/SAVE/PEARO-toolkit
-./run_streaming_pipeline.sh
-```
-
-Ce script:
-* traite les jours un par un
-* fait le prestaging avant chaque transfert
-* attend la fin du transfert, puis du preprocessing, puis de l'envoi
-* nettoie les GRIB du scratch apres succes
-* garde un etat de reprise hors scratch dans `PEARO_STATE_ROOT`
-
-En cas d'interruption, relancer simplement la meme commande: les jours deja termines sont sautes et les etapes manquantes sont reprises.
-
-## Procedure conseillee
-
-### 1. Preparer la config locale
-
-```bash
-cd $HOME/SAVE/PEARO-toolkit
-cp config_input/pearo.env.example config_input/pearo.env
-```
-
-Editer ensuite `config_input/pearo.env`:
-* mettre `PEARO_DO_SEND=0` pour un 1er test sans envoi
-* ajuster `PEARO_DAYS_FILE` si besoin
-* verifier `PEARO_NB_MEMBERS`
-
-Quand l'envoi Cerfacs est pret:
-* mettre `PEARO_DO_SEND=1`
-* renseigner `PEARO_SEND_HOST`
-* renseigner `PEARO_SEND_USER`
-* renseigner `PEARO_SEND_DEST_ROOT`
-
-### 2. Preparer l'environnement
-
-Sur Belenos:
+L'environnement créé par MPM peut être réutilisé si l'utilisateur dispose des droits de lecture et d'exécution :
 
 ```bash
 source /home/ext/cf/cglo/moinemp/SAVE/miniforge3/etc/profile.d/conda.sh
 conda activate pearo_env
+```
+
+Pour une utilisation indépendante et durable, il est également possible de recréer son propre environnement à partir de `env_pearo.yaml`, puis d'adapter `PEARO_CONDA_SH` et `PEARO_CONDA_ENV`.
+
+## Préparation des listes de fichiers
+
+La liste source des fichiers PE-AROME à récupérer est attendue dans :
+
+```text
+config_input/full_lof_to_get.txt
+```
+
+Pour produire une liste par journée et le fichier des dates à traiter :
+
+```bash
+cd config_input
+./scan_file_list.sh full_lof_to_get.txt
+cd ..
+```
+
+Cette commande génère :
+
+- `lof_YYYY-MM-DD.txt`, avec le chemin Hendrix et le nom local de chaque GRIB ;
+- `lof_days.txt`, avec une date par ligne au format `YYYY-MM-DD`.
+
+Exemple d'une ligne de `lof_YYYY-MM-DD.txt` :
+
+```text
+/home/m/mxpt/mxpt001/vortex/arome/pefrance/OPER/2022/08/02/T2100P/mb001/forecast/grid.arome-forecast.eurw1s40+0012:00.grib	mb001_2022-08-02_grid.arome-forecast.eurw1s40+0012:00.grib
+```
+
+Le premier champ est le chemin Hendrix ; le second est le nom donné au fichier dans `orig_data/<YYYY-MM-DD>`.
+
+La sélection 2022 préparée initialement contient 46 journées. Elle devait représenter 13 800 fichiers pour 25 membres, mais seuls 16 membres étaient disponibles sur Hendrix lors des tests, soit 192 fichiers par journée pour les 12 échéances retenues.
+
+## Configuration locale
+
+Créer le fichier de configuration local :
+
+```bash
+cp config_input/pearo.env.example config_input/pearo.env
+```
+
+Le fichier réel `config_input/pearo.env` est ignoré par Git. Les paramètres de connexion ne doivent pas être ajoutés au dépôt.
+
+| Variable | Description | Valeur d'exemple |
+| --- | --- | --- |
+| `PEARO_DATA_ROOT` | Répertoire racine des GRIB temporaires et des NetCDF produits sur le scratch Belenos. | `${WORKDIR}/PEARO_data` |
+| `PEARO_STATE_ROOT` | Répertoire persistant des marqueurs de progression et de reprise, placé hors du scratch. | `${HOME}/.pearo-toolkit-state` |
+| `PEARO_DAYS_FILE` | Fichier des dates à traiter, une par ligne au format `YYYY-MM-DD`. | `${PWD}/config_input/lof_days.txt` |
+| `PEARO_CONDA_SH` | Chemin du script initialisant Conda dans les jobs Slurm. | `/chemin/vers/miniforge3/etc/profile.d/conda.sh` |
+| `PEARO_CONDA_ENV` | Nom de l'environnement Conda contenant les dépendances PEARO. | `pearo_env` |
+| `PEARO_NB_MEMBERS` | Nombre de membres traités pour chaque journée. | `16` |
+| `PEARO_PRESTAGE_CHUNK_SIZE` | Nombre maximal de chemins soumis ensemble à `hstage` et `hfstat`. | `300` |
+| `PEARO_PRESTAGE_POLL_SECONDS` | Délai en secondes entre deux contrôles du pré-staging. | `120` |
+| `PEARO_PRESTAGE_MAX_POLLS` | Nombre maximal de contrôles avant l'échec du pré-staging. | `180` |
+| `PEARO_TRANSFER_PARTITION` | Partition Slurm des transferts Hendrix vers Belenos. | `transfert` |
+| `PEARO_TRANSFER_TIME` | Limite de temps du transfert d'une journée. | `02:00:00` |
+| `PEARO_PREPROCESS_PARTITION` | Partition Slurm utilisée pour le calcul de `tasmax`. | `normal256` |
+| `PEARO_PREPROCESS_TIME` | Limite de temps du prétraitement d'une journée. | `01:00:00` |
+| `PEARO_SEND_PARTITION` | Partition Slurm utilisée pour l'envoi vers le Cerfacs. | `transfert` |
+| `PEARO_SEND_TIME` | Limite de temps de l'envoi d'une journée. | `00:10:00` |
+| `PEARO_DO_SEND` | Active (`1`) ou désactive (`0`) l'envoi vers le Cerfacs. | `1` |
+| `PEARO_CLEAN_ORIG` | Supprime (`1`) ou conserve (`0`) les GRIB après réussite du traitement. | `1` |
+| `PEARO_SEND_HOST` | Nom SSH du serveur Cerfacs destinataire. | `elnino.cerfacs.fr` |
+| `PEARO_SEND_USER` | Compte SSH utilisé sur le serveur destinataire. | `page` |
+| `PEARO_SEND_DEST_ROOT` | Répertoire racine de destination sur le serveur Cerfacs. | `/chemin/de/destination/PEARO` |
+
+Pour un premier test sans envoi, utiliser :
+
+```bash
+PEARO_DO_SEND=0
+```
+
+Avant d'activer l'envoi, renseigner localement `PEARO_SEND_HOST`, `PEARO_SEND_USER` et `PEARO_SEND_DEST_ROOT`.
+
+## Lancement du workflow recommandé
+
+Depuis le dépôt installé sur Belenos :
+
+```bash
 module load hpss/1.0
-```
-
-Avant le 1er transfert Hendrix:
-
-```bash
-ftmotpasse -h hendrix -u $USER
-```
-
-### 3. Lancer le workflow
-
-```bash
 ./run_streaming_pipeline.sh
 ```
 
-Le script:
-* lance le prestaging depuis le login
-* soumet les transferts et envois sur la partition `transfert`
-* soumet le calcul sur `normal256`
-* attend chaque etape avec `sbatch --wait`
+Le script traite les jours un par un et attend la réussite de chaque job avec `sbatch --wait`. Les transferts sont effectués fichier par fichier avec `ftget` ; seul le pré-staging est soumis par lots, définis par `PEARO_PRESTAGE_CHUNK_SIZE`.
 
-### 4. Verifier l'etat
+### Suivi et reprise
 
-Les marqueurs de reprise sont stockes sous:
+Les marqueurs sont conservés sous :
 
-```bash
+```text
 $PEARO_STATE_ROOT/<YYYY-MM-DD>/
 ```
 
-On y trouve par exemple:
-* `transfer.ok`
-* `preprocess.ok`
-* `send.ok`
-* `done.ok`
+Ils comprennent notamment `transfer.ok`, `preprocess.ok`, `send.ok` lorsque l'envoi est activé, et `done.ok`.
 
-### 5. Reprendre apres interruption
-
-Si le scratch est nettoye ou si la session est coupee, relancer simplement:
+Après une interruption, relancer la même commande. Les journées terminées sont ignorées et le workflow reprend les étapes manquantes :
 
 ```bash
 ./run_streaming_pipeline.sh
 ```
 
-Les jours deja termines seront sautes automatiquement.
+## Outils manuels de diagnostic
 
-## Validation effectuee
+Ces commandes ne sont pas nécessaires pour un lancement normal, mais permettent de contrôler séparément les deux premières étapes.
 
-Tests realises sur Belenos et Hendrix au 31 aout 2026:
-* prestaging OK avec `hstage` et `hfstat`
-* transfert OK avec `ftget` sur noeud `transfert`
-* calcul OK sur les 16 membres pour le 2022-08-11
-* envoi Cerfacs OK avec `rsync` depuis un noeud `transfert` vers `elnino.cerfacs.fr`
+Pré-staging d'une journée :
+
+```bash
+module load hpss/1.0
+./prestage_pearo.sh config_input/lof_2022-08-11.txt
+```
+
+Options utiles :
+
+```bash
+./prestage_pearo.sh config_input/lof_2022-08-11.txt --verify-only
+./prestage_pearo.sh config_input/lof_2022-08-11.txt --chunk-size 500 --poll-seconds 300
+```
+
+Transfert manuel, à exécuter sur un nœud `transfert` :
+
+```bash
+./fetch_one_day.sh \
+  config_input/lof_2022-08-11.txt \
+  "$WORKDIR/PEARO_data/orig_data/2022-08-11"
+```
+
+Les anciennes commandes interactives `hshell`, `stage` et `fstat` restent utiles pour diagnostiquer Hendrix. Elles ne constituent pas la procédure recommandée pour traiter les listes PEARO locales à Belenos : le workflow utilise `hstage -a -f` et `hfstat -f`.
+
+## Workflow historique de MPM — legacy
+
+Le dépôt initial utilisait `run_over_all_days.sh`, qui lançait les couples de jobs `get_one_day.job` et `preprocess_one_day.job` en parallèle pour chaque journée. Il permettait également de désactiver globalement le rapatriement :
+
+```bash
+./run_over_all_days.sh
+./run_over_all_days.sh 0
+```
+
+Cette procédure est conservée pour référence et compatibilité, mais elle n'est plus recommandée pour les traitements longs : le contournement du transfert est global, l'état de reprise est moins précis et plusieurs journées peuvent occuper simultanément le scratch.
+
+## Validation effectuée
+
+Tests réalisés sur Belenos et Hendrix le 31 août 2026 :
+
+- pré-staging avec `hstage` et `hfstat` ;
+- transfert avec `ftget` sur un nœud `transfert` ;
+- traitement complet du 11 août 2022 pour les 16 membres disponibles, soit 192 GRIB ;
+- production de 16 fichiers NetCDF journaliers de `tasmax` ;
+- conservation des marqueurs de reprise hors du scratch ;
+- envoi des 16 NetCDF vers `elnino.cerfacs.fr` avec `rsync`.
+
+La concaténation finale des journées et le lancement sur la liste complète restent à valider.
