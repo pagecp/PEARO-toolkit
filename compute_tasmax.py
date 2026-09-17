@@ -21,7 +21,6 @@ print(f"  - orig_datadir: {args.orig_datadir}")
 print(f"  - prepro_datadir: {args.prepro_datadir}")
 print(f"  - nb_members: {args.nb_members}")
 
-FIX_STAMP = "grid.arome-forecast.eurw1s40+00"
 DAY_HOURS = range(12, 24)
 CHUNKS = {"latitude": 200, "longitude": 200}
 GRIB_FILTER = {
@@ -37,22 +36,19 @@ for mbr in range(1, args.nb_members + 1):
     # lecture séquentielle des membres
     member_tag = f"mb{mbr:03d}"
 
-    # exemple de nom de ficher d'origine: mb001_2022-08-11_grid.arome-forecast.eurw1s40+0013:00.grib
-    hourly_data_files = [
-        f"{args.orig_datadir}/{member_tag}_{args.day_tag}_{FIX_STAMP}{hour}:00.grib"
-        for hour in DAY_HOURS  # données diurnes
-    ]
-
-    missing_files = [filepath for filepath in hourly_data_files if not Path(filepath).is_file()]
-    if missing_files:
+    # Forecast lead times depend on the PE-AROME run. Select the daytime
+    # fields from their GRIB valid_time instead of assuming a fixed filename.
+    hourly_data_files = sorted(
+        Path(args.orig_datadir).glob(f"{member_tag}_{args.day_tag}_*.grib")
+    )
+    if not hourly_data_files:
         raise FileNotFoundError(
-            f"{member_tag}: {len(missing_files)} fichier(s) horaire(s) manquant(s), "
-            f"ex. {missing_files[0]}"
+            f"{member_tag}: aucun fichier GRIB trouve dans {args.orig_datadir}"
         )
 
     # ouverture lazy + multi-fichiers (tous les fichiers horaires pour un membres donné/un jour donné)
     ds = xr.open_mfdataset(
-        hourly_data_files,
+        [str(filepath) for filepath in hourly_data_files],
         engine="cfgrib",
         combine="nested",
         concat_dim="step",  # ou "time" selon cfgrib
@@ -65,9 +61,23 @@ for mbr in range(1, args.nb_members + 1):
         if "t2m" not in ds:
             raise KeyError(f"{member_tag}: variable 't2m' absente du GRIB")
 
+        if "valid_time" not in ds.coords:
+            raise KeyError(f"{member_tag}: coordonnee 'valid_time' absente du GRIB")
+
+        valid_hours = ds["valid_time"].dt.hour
+        daytime_mask = valid_hours.isin(DAY_HOURS)
+        daytime_count = int(daytime_mask.sum().item())
+        if daytime_count != len(DAY_HOURS):
+            raise ValueError(
+                f"{member_tag}: {daytime_count} champ(s) entre 12h et 23h, "
+                f"{len(DAY_HOURS)} attendu(s)"
+            )
+
+        daytime_ds = ds.sel(step=daytime_mask)
+
         # Max journalier (diurne) de la température de l'air à 2 m.
         tasmax = (
-            ds["t2m"]
+            daytime_ds["t2m"]
             .max(dim="step")
             .expand_dims(time=[np.datetime64(args.day_tag)])
             .rename("tasmax")
