@@ -28,7 +28,7 @@ Pour chaque date listée dans `PEARO_DAYS_FILE`, le workflow réalise les étape
 4. envoi optionnel des NetCDF vers le Cerfacs avec `rsync`, sur un nœud `transfert` ;
 5. suppression optionnelle des GRIB temporaires après réussite.
 
-Le `tasmax` est calculé à partir des 12 heures de validité comprises entre 12 h et 23 h. Les échéances de prévision ne sont pas supposées fixes: le script les lit depuis les GRIB téléchargés. Il ne correspond donc pas à un maximum calculé sur 24 heures.
+Le `tasmax` est calculé à partir des 12 champs horaires sélectionnés dans chaque liste de fichiers. Le script vérifie que leurs heures de validité sont distinctes et consécutives, sans supposer d'échéances de prévision fixes. Il ne correspond donc pas à un maximum calculé sur 24 heures.
 
 ## Installation sur Belenos
 

@@ -21,7 +21,7 @@ print(f"  - orig_datadir: {args.orig_datadir}")
 print(f"  - prepro_datadir: {args.prepro_datadir}")
 print(f"  - nb_members: {args.nb_members}")
 
-DAY_HOURS = range(12, 24)
+EXPECTED_HOURLY_FIELDS = 12
 CHUNKS = {"latitude": 200, "longitude": 200}
 GRIB_FILTER = {
     "stepType": "instant",
@@ -36,8 +36,8 @@ for mbr in range(1, args.nb_members + 1):
     # lecture séquentielle des membres
     member_tag = f"mb{mbr:03d}"
 
-    # Forecast lead times depend on the PE-AROME run. Select the daytime
-    # fields from their GRIB valid_time instead of assuming a fixed filename.
+    # Forecast lead times depend on the PE-AROME run. The file list selects
+    # the daytime window; do not assume fixed lead times in filenames.
     hourly_data_files = sorted(
         Path(args.orig_datadir).glob(f"{member_tag}_{args.day_tag}_*.grib")
     )
@@ -64,20 +64,22 @@ for mbr in range(1, args.nb_members + 1):
         if "valid_time" not in ds.coords:
             raise KeyError(f"{member_tag}: coordonnee 'valid_time' absente du GRIB")
 
-        valid_hours = ds["valid_time"].dt.hour
-        daytime_mask = valid_hours.isin(DAY_HOURS)
-        daytime_count = int(daytime_mask.sum().item())
-        if daytime_count != len(DAY_HOURS):
+        valid_times = np.unique(np.asarray(ds["valid_time"].values))
+        if len(valid_times) != EXPECTED_HOURLY_FIELDS:
             raise ValueError(
-                f"{member_tag}: {daytime_count} champ(s) entre 12h et 23h, "
-                f"{len(DAY_HOURS)} attendu(s)"
+                f"{member_tag}: {len(valid_times)} instant(s) de validite, "
+                f"{EXPECTED_HOURLY_FIELDS} attendu(s)"
             )
 
-        daytime_ds = ds.sel(step=daytime_mask)
+        hourly_gaps = np.diff(valid_times).astype("timedelta64[h]")
+        if not np.all(hourly_gaps == np.timedelta64(1, "h")):
+            raise ValueError(
+                f"{member_tag}: les instants de validite ne sont pas horaires et consecutifs"
+            )
 
-        # Max journalier (diurne) de la température de l'air à 2 m.
+        # Maximum sur les 12 champs horaires selectionnes par la liste d'entree.
         tasmax = (
-            daytime_ds["t2m"]
+            ds["t2m"]
             .max(dim="step")
             .expand_dims(time=[np.datetime64(args.day_tag)])
             .rename("tasmax")
