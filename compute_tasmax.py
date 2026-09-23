@@ -11,7 +11,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--day_tag", required=True, type=str, help="Jour à traiter (format YYYY-MM-DD)")
 parser.add_argument("--orig_datadir", required=True, type=str, help="Répertoire des données d'origine à traiter")
 parser.add_argument("--prepro_datadir", required=True,type=str, help="Répertoire des données prétraitées à générer")
-parser.add_argument("--nb_members", type=int, default=16, help="Nombre de membres à traiter")
+parser.add_argument("--members_file", type=str, help="Fichier contenant un tag mbXXX par ligne")
+parser.add_argument("--skip_existing", action="store_true", help="Ne pas recalculer les NetCDF déjà présents")
 
 args = parser.parse_args()
 
@@ -19,7 +20,7 @@ print("Arguments reçus par le script compute_tasmax.py :")
 print(f"  - day_tag: {args.day_tag}")
 print(f"  - orig_datadir: {args.orig_datadir}")
 print(f"  - prepro_datadir: {args.prepro_datadir}")
-print(f"  - nb_members: {args.nb_members}")
+print(f"  - members_file: {args.members_file}")
 
 EXPECTED_HOURLY_FIELDS = 12
 CHUNKS = {"latitude": 200, "longitude": 200}
@@ -30,21 +31,50 @@ GRIB_FILTER = {
     "paramId": 167,
 }
 
-Path(args.prepro_datadir).mkdir(parents=True, exist_ok=True)
+orig_datadir = Path(args.orig_datadir)
+prepro_datadir = Path(args.prepro_datadir)
+prepro_datadir.mkdir(parents=True, exist_ok=True)
 
-for mbr in range(1, args.nb_members + 1):
-    # lecture séquentielle des membres
-    member_tag = f"mb{mbr:03d}"
+if args.members_file:
+    members_file = Path(args.members_file)
+    if not members_file.is_file():
+        raise FileNotFoundError(f"Fichier de membres absent: {members_file}")
+    member_tags = sorted(
+        {
+            line.strip()
+            for line in members_file.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        }
+    )
+else:
+    member_tags = sorted(
+        {
+            filepath.name.split("_", 1)[0]
+            for filepath in orig_datadir.glob(f"mb???_{args.day_tag}_*.grib")
+        }
+    )
+
+if not member_tags:
+    raise FileNotFoundError(f"Aucun membre trouve dans {orig_datadir}")
+
+for member_tag in member_tags:
+    if len(member_tag) != 5 or not member_tag.startswith("mb") or not member_tag[2:].isdigit():
+        raise ValueError(f"Tag membre invalide: {member_tag}")
 
     # Forecast lead times depend on the PE-AROME run. The file list selects
     # the daytime window; do not assume fixed lead times in filenames.
     hourly_data_files = sorted(
-        Path(args.orig_datadir).glob(f"{member_tag}_{args.day_tag}_*.grib")
+        orig_datadir.glob(f"{member_tag}_{args.day_tag}_*.grib")
     )
     if not hourly_data_files:
         raise FileNotFoundError(
-            f"{member_tag}: aucun fichier GRIB trouve dans {args.orig_datadir}"
+            f"{member_tag}: aucun fichier GRIB trouve dans {orig_datadir}"
         )
+
+    output_file = prepro_datadir / f"tasmax_PEARO_{member_tag}_{args.day_tag}.nc"
+    if args.skip_existing and output_file.is_file() and output_file.stat().st_size > 0:
+        print(f"{member_tag}: keeping existing {output_file}")
+        continue
 
     # ouverture lazy + multi-fichiers (tous les fichiers horaires pour un membres donné/un jour donné)
     ds = xr.open_mfdataset(
@@ -94,7 +124,6 @@ for mbr in range(1, args.nb_members + 1):
         tasmax["tasmax"].attrs["standard_name"] = "air_temperature"
         tasmax["tasmax"].attrs["units"] = "K"
 
-        output_file = f"{args.prepro_datadir}/tasmax_PEARO_{member_tag}_{args.day_tag}.nc"
         tasmax.to_netcdf(output_file)
         print(f"{member_tag}: wrote {output_file}")
     finally:

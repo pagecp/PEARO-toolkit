@@ -9,14 +9,19 @@ set -euoxv pipefail
 
 DAY_FMT="$1"
 DATA_INDIR="$2"
+LOF_FILE="${3:-}"
 
 SCRIPT_DIR="$SLURM_SUBMIT_DIR"
 echo "$0: SCRIPT_DIR: $SCRIPT_DIR"
 CONFIG_DIR=$SCRIPT_DIR/config_input
 
+if [ -z "$LOF_FILE" ]; then
+    LOF_FILE="$CONFIG_DIR/lof_${DAY_FMT}.txt"
+fi
+
 echo "Transfer data for $DAY_FMT"
 
-"$SCRIPT_DIR/fetch_one_day.sh" "$CONFIG_DIR/lof_${DAY_FMT}.txt" "$DATA_INDIR"
+"$SCRIPT_DIR/fetch_one_day.sh" "$LOF_FILE" "$DATA_INDIR"
 
 echo "Transfer done for $DAY_FMT"
 

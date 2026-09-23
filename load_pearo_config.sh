@@ -25,7 +25,6 @@ fi
 : "${PEARO_DAYS_FILE:=$SCRIPT_DIR/config_input/lof_days.txt}"
 : "${PEARO_CONDA_SH:=/home/ext/cf/cglo/moinemp/SAVE/miniforge3/etc/profile.d/conda.sh}"
 : "${PEARO_CONDA_ENV:=pearo_env}"
-: "${PEARO_NB_MEMBERS:=16}"
 : "${PEARO_PRESTAGE_CHUNK_SIZE:=300}"
 : "${PEARO_PRESTAGE_POLL_SECONDS:=120}"
 : "${PEARO_PRESTAGE_MAX_POLLS:=180}"
@@ -47,7 +46,6 @@ export PEARO_STATE_ROOT
 export PEARO_DAYS_FILE
 export PEARO_CONDA_SH
 export PEARO_CONDA_ENV
-export PEARO_NB_MEMBERS
 export PEARO_PRESTAGE_CHUNK_SIZE
 export PEARO_PRESTAGE_POLL_SECONDS
 export PEARO_PRESTAGE_MAX_POLLS

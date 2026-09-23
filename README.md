@@ -128,7 +128,7 @@ Exemple d'une ligne de `lof_YYYY-MM-DD.txt` :
 
 Le premier champ est le chemin Hendrix ; le second est le nom donné au fichier dans `orig_data/<YYYY-MM-DD>`.
 
-La sélection 2022 préparée initialement contient 46 journées. Elle devait représenter 13 800 fichiers pour 25 membres, mais seuls 16 membres étaient disponibles sur Hendrix lors des tests, soit 192 fichiers par journée pour les 12 échéances retenues.
+Le nombre de membres est déduit de chaque fichier `lof_YYYY-MM-DD.txt`. Le workflow accepte donc des journées avec `mb000` à `mb016` (17 membres) comme des journées avec `mb000` à `mb024` (25 membres), sans modification de la configuration.
 
 ## Configuration locale
 
@@ -147,7 +147,6 @@ Le fichier réel `config_input/pearo.env` est ignoré par Git. Les paramètres d
 | `PEARO_DAYS_FILE` | Fichier des dates à traiter, une par ligne au format `YYYY-MM-DD`. | `${PWD}/config_input/lof_days.txt` |
 | `PEARO_CONDA_SH` | Chemin du script initialisant Conda dans les jobs Slurm. | `/chemin/vers/miniforge3/etc/profile.d/conda.sh` |
 | `PEARO_CONDA_ENV` | Nom de l'environnement Conda contenant les dépendances PEARO. | `pearo_env` |
-| `PEARO_NB_MEMBERS` | Nombre de membres traités pour chaque journée. | `16` |
 | `PEARO_PRESTAGE_CHUNK_SIZE` | Nombre maximal de chemins soumis ensemble à `hstage` et `hfstat`. | `300` |
 | `PEARO_PRESTAGE_POLL_SECONDS` | Délai en secondes entre deux contrôles du pré-staging. | `120` |
 | `PEARO_PRESTAGE_MAX_POLLS` | Nombre maximal de contrôles avant l'échec du pré-staging. | `180` |
@@ -192,7 +191,7 @@ $PEARO_STATE_ROOT/<YYYY-MM-DD>/
 
 Ils comprennent notamment `transfer.ok`, `preprocess.ok`, `send.ok` lorsque l'envoi est activé, et `done.ok`.
 
-Après une interruption, relancer la même commande. Les journées terminées sont ignorées et le workflow reprend les étapes manquantes :
+Après une interruption, relancer la même commande. Le workflow vérifie les membres attendus dans le LOF avant d'ignorer une journée marquée terminée. Si la liste est complétée avec de nouveaux membres, il rétablit les GRIB nécessaires si le scratch a été purgé, puis ne recalcule que les NetCDF manquants avant de reprendre l'envoi :
 
 ```bash
 ./run_streaming_pipeline.sh

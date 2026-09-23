@@ -10,6 +10,7 @@ set -euoxv pipefail
 DAY_FMT="$1"
 DATA_INDIR="$2"
 DATA_OUTDIR="$3"
+MEMBERS_FILE="$4"
 
 SCRIPT_DIR="$SLURM_SUBMIT_DIR"
 echo "$0: SCRIPT_DIR: $SCRIPT_DIR"
@@ -24,6 +25,11 @@ source "$PEARO_CONDA_SH"
 conda activate "$PEARO_CONDA_ENV"
 
 # preprocessing
-python $SCRIPT_DIR/compute_tasmax.py --day_tag $DAY_FMT --orig_datadir $DATA_INDIR --prepro_datadir $DATA_OUTDIR --nb_members "$PEARO_NB_MEMBERS"
+python "$SCRIPT_DIR/compute_tasmax.py" \
+    --day_tag "$DAY_FMT" \
+    --orig_datadir "$DATA_INDIR" \
+    --prepro_datadir "$DATA_OUTDIR" \
+    --members_file "$MEMBERS_FILE" \
+    --skip_existing
 
 echo "Prepocessing done for $DAY_FMT"
