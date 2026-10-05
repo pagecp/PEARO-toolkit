@@ -197,6 +197,16 @@ Après une interruption, relancer la même commande. Le workflow vérifie les me
 ./run_streaming_pipeline.sh
 ```
 
+### Fichiers indisponibles
+
+Chaque opération `hstage`, `hfstat` et `ftget` est tentée trois fois. Après trois échecs, le workflow exclut le membre concerné pour la journée entière afin de ne pas calculer un `tasmax` incomplet, puis poursuit les autres membres et les jours suivants. Une journée sans membre récupérable est signalée comme ignorée et sera retentée au prochain lancement.
+
+Le récapitulatif des membres non récupérés est écrit dans :
+
+```text
+$PEARO_STATE_ROOT/unavailable_members.tsv
+```
+
 ## Outils manuels de diagnostic
 
 Ces commandes ne sont pas nécessaires pour un lancement normal, mais permettent de contrôler séparément les deux premières étapes.
