@@ -13,6 +13,7 @@ Options:
   --retries N          Retries for a failed hstage/hfstat command (default: 3)
   --workdir DIR        Directory used for manifests and logs
   --verify-only        Skip hstage and only poll file status
+  --continue-on-error  Record unavailable paths and continue
   -h, --help           Show this help
 
 Input format:
@@ -77,12 +78,18 @@ collect_pending_paths() {
     local input_file="$1"
     local output_file="$2"
     local raw_status="$3"
+    local failed_paths="$4"
     : > "$output_file"
     : > "$raw_status"
 
     while IFS= read -r chunk_file; do
         [ -n "$chunk_file" ] || continue
-        retry_cmd "$RETRIES" hfstat -f "$chunk_file" >> "$raw_status"
+        if ! retry_cmd "$RETRIES" hfstat -f "$chunk_file" >> "$raw_status"; then
+            if [ "$CONTINUE_ON_ERROR" -eq 0 ]; then
+                return 1
+            fi
+            cat "$chunk_file" >> "$failed_paths"
+        fi
     done < <(find "$CHUNK_DIR" -type f -name 'chunk_[0-9][0-9][0-9][0-9]' | sort)
 
     awk '
@@ -102,6 +109,7 @@ POLL_SECONDS=120
 MAX_POLLS=180
 RETRIES=3
 VERIFY_ONLY=0
+CONTINUE_ON_ERROR=0
 WORKDIR=""
 
 while [ $# -gt 0 ]; do
@@ -128,6 +136,10 @@ while [ $# -gt 0 ]; do
             ;;
         --verify-only)
             VERIFY_ONLY=1
+            shift
+            ;;
+        --continue-on-error)
+            CONTINUE_ON_ERROR=1
             shift
             ;;
         -h|--help)
@@ -169,9 +181,11 @@ mkdir -p "$CHUNK_DIR"
 MANIFEST_ALL="$WORKDIR/all_paths.txt"
 MANIFEST_PENDING="$WORKDIR/pending_paths.txt"
 RAW_STATUS="$WORKDIR/hfstat_latest.txt"
+FAILED_PATHS="$WORKDIR/failed_paths.txt"
 
 extract_hendrix_paths "$LOF_FILE" "$MANIFEST_ALL"
 cp "$MANIFEST_ALL" "$MANIFEST_PENDING"
+: > "$FAILED_PATHS"
 
 TOTAL_FILES="$(wc -l < "$MANIFEST_ALL" | tr -d ' ')"
 [ "$TOTAL_FILES" -gt 0 ] || die "No Hendrix path found in $LOF_FILE"
@@ -190,7 +204,12 @@ while true; do
     fi
 
     if [ "$poll" -ge "$MAX_POLLS" ]; then
-        die "Maximum number of polls reached with $remaining file(s) still not ONL. Resume with --workdir $WORKDIR --verify-only or rerun the script."
+        if [ "$CONTINUE_ON_ERROR" -eq 0 ]; then
+            die "Maximum number of polls reached with $remaining file(s) still not ONL. Resume with --workdir $WORKDIR --verify-only or rerun the script."
+        fi
+        cat "$MANIFEST_PENDING" >> "$FAILED_PATHS"
+        : > "$MANIFEST_PENDING"
+        break
     fi
 
     rm -f "$CHUNK_DIR"/chunk_*
@@ -200,18 +219,48 @@ while true; do
         log "Submitting hstage for $remaining pending file(s)."
         while IFS= read -r chunk_file; do
             [ -n "$chunk_file" ] || continue
-            retry_cmd "$RETRIES" hstage -a -f "$chunk_file" > "$chunk_file.hstage.log" 2>&1 || die "hstage failed for $chunk_file"
+            if ! retry_cmd "$RETRIES" hstage -a -f "$chunk_file" > "$chunk_file.hstage.log" 2>&1; then
+                if [ "$CONTINUE_ON_ERROR" -eq 0 ]; then
+                    die "hstage failed for $chunk_file"
+                fi
+
+                while IFS= read -r path; do
+                    [ -n "$path" ] || continue
+                    single_path_file="$WORKDIR/single_path.txt"
+                    printf '%s\n' "$path" > "$single_path_file"
+                    if ! retry_cmd "$RETRIES" hstage -a -f "$single_path_file" \
+                        >> "$chunk_file.hstage.log" 2>&1; then
+                        printf '%s\n' "$path" >> "$FAILED_PATHS"
+                    fi
+                done < "$chunk_file"
+            fi
         done < <(find "$CHUNK_DIR" -type f -name 'chunk_[0-9][0-9][0-9][0-9]' | sort)
     else
         log "Verification round for $remaining pending file(s)."
     fi
 
-    log "Polling HFSTAT status."
-    collect_pending_paths "$MANIFEST_PENDING" "$WORKDIR/pending_next.txt" "$RAW_STATUS"
+    sort -u "$FAILED_PATHS" -o "$FAILED_PATHS"
+    comm -23 "$MANIFEST_PENDING" "$FAILED_PATHS" > "$WORKDIR/pending_stageable.txt"
+    mv "$WORKDIR/pending_stageable.txt" "$MANIFEST_PENDING"
 
-    mv "$WORKDIR/pending_next.txt" "$MANIFEST_PENDING"
+    if [ ! -s "$MANIFEST_PENDING" ]; then
+        break
+    fi
+
+    rm -f "$CHUNK_DIR"/chunk_*
+    split -l "$CHUNK_SIZE" -d -a 4 "$MANIFEST_PENDING" "$CHUNK_DIR/chunk_"
+
+    log "Polling HFSTAT status."
+    if ! collect_pending_paths "$MANIFEST_PENDING" "$WORKDIR/pending_next.txt" "$RAW_STATUS" "$FAILED_PATHS"; then
+        die "hfstat failed"
+    fi
+
+    sort -u "$FAILED_PATHS" -o "$FAILED_PATHS"
+    comm -23 "$WORKDIR/pending_next.txt" "$FAILED_PATHS" > "$MANIFEST_PENDING"
+
     pending_after_poll="$(wc -l < "$MANIFEST_PENDING" | tr -d ' ')"
-    onl_count=$((TOTAL_FILES - pending_after_poll))
+    failed_count="$(wc -l < "$FAILED_PATHS" | tr -d ' ')"
+    onl_count=$((TOTAL_FILES - pending_after_poll - failed_count))
 
     log "Status after poll ${poll}: ${onl_count}/${TOTAL_FILES} ONL, ${pending_after_poll} pending."
 
@@ -224,3 +273,10 @@ while true; do
     log "Sleeping ${POLL_SECONDS}s before next round."
     sleep "$POLL_SECONDS"
 done
+
+failed_count="$(wc -l < "$FAILED_PATHS" | tr -d ' ')"
+if [ "$failed_count" -gt 0 ]; then
+    log "Prestaging finished with $failed_count unavailable file(s): $FAILED_PATHS"
+else
+    log "Prestaging complete: all files are ONL."
+fi

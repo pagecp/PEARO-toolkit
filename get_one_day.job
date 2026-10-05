@@ -10,6 +10,7 @@ set -euoxv pipefail
 DAY_FMT="$1"
 DATA_INDIR="$2"
 LOF_FILE="${3:-}"
+FAILED_FILE="${4:-}"
 
 SCRIPT_DIR="$SLURM_SUBMIT_DIR"
 echo "$0: SCRIPT_DIR: $SCRIPT_DIR"
@@ -21,7 +22,11 @@ fi
 
 echo "Transfer data for $DAY_FMT"
 
-"$SCRIPT_DIR/fetch_one_day.sh" "$LOF_FILE" "$DATA_INDIR"
+FETCH_ARGS=("$LOF_FILE" "$DATA_INDIR" --retries 3)
+if [ -n "$FAILED_FILE" ]; then
+    FETCH_ARGS+=(--failed-file "$FAILED_FILE" --continue-on-error)
+fi
+"$SCRIPT_DIR/fetch_one_day.sh" "${FETCH_ARGS[@]}"
 
 echo "Transfer done for $DAY_FMT"
 

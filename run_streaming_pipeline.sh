@@ -91,6 +91,39 @@ filter_lof_by_filenames() {
     ' "$filenames_file" "$lof_file"
 }
 
+extract_member_tags() {
+    sed -n 's|.*\/\(mb[0-9][0-9][0-9]\)\/.*|\1|p; s|^\(mb[0-9][0-9][0-9]\)_.*|\1|p' "$1" | sort -u
+}
+
+filter_lof_excluding_members() {
+    local lof_file="$1"
+    local excluded_members="$2"
+
+    awk -F '\t' '
+        FNR == NR { excluded[$1] = 1; next }
+        /^[[:space:]]*$/ || /^[[:space:]]*#/ { next }
+        {
+            if (match($2, /^mb[0-9][0-9][0-9]_/) != 0) {
+                member = substr($2, RSTART, 5)
+            } else if (match($1, /\/mb[0-9][0-9][0-9]\//) != 0) {
+                member = substr($1, RSTART + 1, 5)
+            } else {
+                next
+            }
+            if (!(member in excluded)) {
+                print
+            }
+        }
+    ' "$excluded_members" "$lof_file"
+}
+
+refresh_expected_manifests() {
+    EXPECTED_FILES="$(count_expected_files "$LOF_FILE")"
+    extract_expected_filenames "$LOF_FILE" > "$EXPECTED_FILES_FILE"
+    extract_expected_members "$LOF_FILE" > "$EXPECTED_MEMBERS_FILE"
+    EXPECTED_MEMBERS="$(wc -l < "$EXPECTED_MEMBERS_FILE" | tr -d ' ')"
+}
+
 mkdir -p "$SCRIPT_DIR/logs" "$PEARO_STATE_ROOT"
 
 while IFS= read -r DAY_FMT; do
@@ -107,6 +140,8 @@ while IFS= read -r DAY_FMT; do
     EXPECTED_FILES_FILE="$DAY_STATE_DIR/expected_grib_files.txt"
     EXPECTED_MEMBERS_FILE="$DAY_STATE_DIR/expected_members.txt"
     MISSING_NC_FILE="$DAY_STATE_DIR/missing_members.txt"
+    UNAVAILABLE_MEMBERS_FILE="$DAY_STATE_DIR/unavailable_members.tsv"
+    USABLE_LOF_FILE="$DAY_STATE_DIR/usable_lof.txt"
 
     [ -f "$LOF_FILE" ] || die "Missing file list for $DAY_FMT: $LOF_FILE"
 
@@ -142,10 +177,31 @@ while IFS= read -r DAY_FMT; do
             --chunk-size "$PEARO_PRESTAGE_CHUNK_SIZE" \
             --poll-seconds "$PEARO_PRESTAGE_POLL_SECONDS" \
             --max-polls "$PEARO_PRESTAGE_MAX_POLLS" \
-            --workdir "$DAY_STATE_DIR/prestage"
+            --workdir "$DAY_STATE_DIR/prestage" \
+            --continue-on-error
+
+        : > "$UNAVAILABLE_MEMBERS_FILE"
+        extract_member_tags "$DAY_STATE_DIR/prestage/failed_paths.txt" > "$DAY_STATE_DIR/unavailable_tags.txt"
+        while IFS= read -r member; do
+            [ -n "$member" ] || continue
+            printf '%s\t%s\tprestage\n' "$DAY_FMT" "$member" >> "$UNAVAILABLE_MEMBERS_FILE"
+        done < "$DAY_STATE_DIR/unavailable_tags.txt"
+
+        if [ -s "$DAY_STATE_DIR/unavailable_tags.txt" ]; then
+            filter_lof_excluding_members "$LOF_FILE" "$DAY_STATE_DIR/unavailable_tags.txt" > "$USABLE_LOF_FILE"
+            LOF_FILE="$USABLE_LOF_FILE"
+            refresh_expected_manifests
+        fi
+
+        if [ "$EXPECTED_MEMBERS" -eq 0 ]; then
+            log "Skipping $DAY_FMT: no recoverable member."
+            touch "$DAY_STATE_DIR/skipped.ok"
+            continue
+        fi
 
         MISSING_GRIB_FILE="$DAY_STATE_DIR/missing_grib_files.txt"
         MISSING_GRIB_LOF="$DAY_STATE_DIR/missing_grib_lof.txt"
+        TRANSFER_FAILED_FILE="$DAY_STATE_DIR/transfer_failed.tsv"
         missing_manifest_entries "$EXPECTED_FILES_FILE" "$DATA_INDIR" "" "" > "$MISSING_GRIB_FILE"
         MISSING_GRIB="$(wc -l < "$MISSING_GRIB_FILE" | tr -d ' ')"
         if [ "$MISSING_GRIB" -gt 0 ]; then
@@ -158,13 +214,32 @@ while IFS= read -r DAY_FMT; do
                 "$SCRIPT_DIR/get_one_day.job" \
                 "$DAY_FMT" \
                 "$DATA_INDIR" \
-                "$MISSING_GRIB_LOF"
+                "$MISSING_GRIB_LOF" \
+                "$TRANSFER_FAILED_FILE"
             touch "$TRANSFER_MARK"
         elif [ ! -f "$TRANSFER_MARK" ]; then
             log "All GRIB files are already present for $DAY_FMT"
             touch "$TRANSFER_MARK"
         else
             log "Transfer already complete for $DAY_FMT"
+        fi
+
+        if [ -s "$TRANSFER_FAILED_FILE" ]; then
+            cut -f 2 "$TRANSFER_FAILED_FILE" | extract_member_tags /dev/stdin > "$DAY_STATE_DIR/transfer_failed_members.txt"
+            while IFS= read -r member; do
+                [ -n "$member" ] || continue
+                printf '%s\t%s\ttransfer\n' "$DAY_FMT" "$member" >> "$UNAVAILABLE_MEMBERS_FILE"
+            done < "$DAY_STATE_DIR/transfer_failed_members.txt"
+            sort -u "$DAY_STATE_DIR/unavailable_tags.txt" "$DAY_STATE_DIR/transfer_failed_members.txt" > "$DAY_STATE_DIR/all_unavailable_tags.txt"
+            filter_lof_excluding_members "$LOF_FILE" "$DAY_STATE_DIR/all_unavailable_tags.txt" > "$USABLE_LOF_FILE"
+            LOF_FILE="$USABLE_LOF_FILE"
+            refresh_expected_manifests
+        fi
+
+        if [ "$EXPECTED_MEMBERS" -eq 0 ]; then
+            log "Skipping $DAY_FMT: no recoverable member."
+            touch "$DAY_STATE_DIR/skipped.ok"
+            continue
         fi
 
         missing_manifest_entries "$EXPECTED_FILES_FILE" "$DATA_INDIR" "" "" > "$MISSING_GRIB_FILE"
@@ -229,3 +304,10 @@ while IFS= read -r DAY_FMT; do
     touch "$DONE_MARK"
     log "Day $DAY_FMT completed"
 done < "$PEARO_DAYS_FILE"
+
+UNAVAILABLE_REPORT="$PEARO_STATE_ROOT/unavailable_members.tsv"
+find "$PEARO_STATE_ROOT" -mindepth 2 -maxdepth 2 -type f -name 'unavailable_members.tsv' \
+    -exec cat {} + | sort -u > "$UNAVAILABLE_REPORT"
+if [ -s "$UNAVAILABLE_REPORT" ]; then
+    log "Unavailable members report: $UNAVAILABLE_REPORT"
+fi
