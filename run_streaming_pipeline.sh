@@ -117,6 +117,28 @@ filter_lof_excluding_members() {
     ' "$excluded_members" "$lof_file"
 }
 
+filter_lof_by_members() {
+    local lof_file="$1"
+    local members_file="$2"
+
+    awk -F '\t' '
+        FNR == NR { wanted[$1] = 1; next }
+        /^[[:space:]]*$/ || /^[[:space:]]*#/ { next }
+        {
+            if (match($2, /^mb[0-9][0-9][0-9]_/) != 0) {
+                member = substr($2, RSTART, 5)
+            } else if (match($1, /\/mb[0-9][0-9][0-9]\//) != 0) {
+                member = substr($1, RSTART + 1, 5)
+            } else {
+                next
+            }
+            if (member in wanted) {
+                print
+            }
+        }
+    ' "$members_file" "$lof_file"
+}
+
 refresh_expected_manifests() {
     EXPECTED_FILES="$(count_expected_files "$LOF_FILE")"
     extract_expected_filenames "$LOF_FILE" > "$EXPECTED_FILES_FILE"
@@ -167,6 +189,13 @@ while IFS= read -r DAY_FMT; do
     if [ -f "$DONE_MARK" ]; then
         log "Reopening $DAY_FMT: $MISSING_NC member(s) are missing."
         rm -f "$DONE_MARK"
+    fi
+
+    if [ "$MISSING_NC" -gt 0 ]; then
+        filter_lof_by_members "$LOF_FILE" "$MISSING_NC_FILE" > "$USABLE_LOF_FILE"
+        LOF_FILE="$USABLE_LOF_FILE"
+        refresh_expected_manifests
+        log "Processing only $EXPECTED_MEMBERS missing member(s) for $DAY_FMT."
     fi
 
     log "Processing $DAY_FMT"

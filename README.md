@@ -191,7 +191,7 @@ $PEARO_STATE_ROOT/<YYYY-MM-DD>/
 
 Ils comprennent notamment `transfer.ok`, `preprocess.ok`, `send.ok` lorsque l'envoi est activé, et `done.ok`.
 
-Après une interruption, relancer la même commande. Le workflow vérifie les membres attendus dans le LOF avant d'ignorer une journée marquée terminée. Si la liste est complétée avec de nouveaux membres, il rétablit les GRIB nécessaires si le scratch a été purgé, puis ne recalcule que les NetCDF manquants avant de reprendre l'envoi :
+Après une interruption, relancer la même commande. Le workflow vérifie les membres attendus dans le LOF avant d'ignorer une journée marquée terminée. Si un ou plusieurs NetCDF manquent, il limite le pré-staging et le transfert aux seuls membres concernés, puis ne recalcule que leurs NetCDF avant de reprendre l'envoi :
 
 ```bash
 ./run_streaming_pipeline.sh
