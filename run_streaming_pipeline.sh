@@ -17,6 +17,16 @@ die() {
     exit 1
 }
 
+write_unavailable_report() {
+    local report="$PEARO_STATE_ROOT/unavailable_members.tsv"
+
+    find "$PEARO_STATE_ROOT" -mindepth 2 -maxdepth 2 -type f -name 'unavailable_members.tsv' \
+        -exec cat {} + | sort -u > "$report"
+    if [ -s "$report" ]; then
+        log "Unavailable members report: $report"
+    fi
+}
+
 count_expected_files() {
     local lof_file="$1"
     awk -F '\t' '
@@ -147,6 +157,7 @@ refresh_expected_manifests() {
 }
 
 mkdir -p "$SCRIPT_DIR/logs" "$PEARO_STATE_ROOT"
+trap write_unavailable_report EXIT
 
 while IFS= read -r DAY_FMT; do
     [ -n "$DAY_FMT" ] || continue
@@ -333,10 +344,3 @@ while IFS= read -r DAY_FMT; do
     touch "$DONE_MARK"
     log "Day $DAY_FMT completed"
 done < "$PEARO_DAYS_FILE"
-
-UNAVAILABLE_REPORT="$PEARO_STATE_ROOT/unavailable_members.tsv"
-find "$PEARO_STATE_ROOT" -mindepth 2 -maxdepth 2 -type f -name 'unavailable_members.tsv' \
-    -exec cat {} + | sort -u > "$UNAVAILABLE_REPORT"
-if [ -s "$UNAVAILABLE_REPORT" ]; then
-    log "Unavailable members report: $UNAVAILABLE_REPORT"
-fi

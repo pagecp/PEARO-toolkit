@@ -199,13 +199,17 @@ Après une interruption, relancer la même commande. Le workflow vérifie les me
 
 ### Fichiers indisponibles
 
-Chaque opération `hstage`, `hfstat` et `ftget` est tentée trois fois. Après trois échecs, le workflow exclut immédiatement le membre concerné pour la journée entière et ne tente pas ses autres échéances, afin de ne pas calculer un `tasmax` incomplet. Il poursuit ensuite les autres membres et les jours suivants. Une journée sans membre récupérable est signalée comme ignorée et sera retentée au prochain lancement.
+Chaque opération `hstage`, `hfstat` et `ftget` est tentée trois fois. Après trois échecs propres à un fichier, le workflow exclut immédiatement le membre concerné pour la journée entière et ne tente pas ses autres échéances, afin de ne pas calculer un `tasmax` incomplet. Il poursuit ensuite les autres membres et les jours suivants. Une journée sans membre récupérable est signalée comme ignorée et sera retentée au prochain lancement.
+
+Une erreur de connectivité Hendrix reconnue (par exemple `No route to host`) est différente d'une donnée absente: le pipeline s'arrête sans déclarer les membres indisponibles. Il suffit de le relancer lorsque la connectivité est rétablie.
 
 Le récapitulatif des membres non récupérés est écrit dans :
 
 ```text
 $PEARO_STATE_ROOT/unavailable_members.tsv
 ```
+
+Il est aussi réécrit si le pipeline s'arrête de façon imprévue.
 
 ## Outils manuels de diagnostic
 

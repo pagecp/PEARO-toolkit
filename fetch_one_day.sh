@@ -21,6 +21,10 @@ log() {
     printf '[%s] %s\n' "$(date '+%F %T')" "$*"
 }
 
+is_connectivity_error() {
+    grep -Eqi 'No route to host|Network is unreachable|Connection (refused|timed out|reset)|connect.*return (101|111|113)' "$1"
+}
+
 [ $# -ge 2 ] || { usage; exit 1; }
 LOF_FILE="$1"
 OUTPUT_DIR="$2"
@@ -46,8 +50,9 @@ done
 mkdir -p "$OUTPUT_DIR"
 [ -z "$FAILED_FILE" ] || : > "$FAILED_FILE"
 FAILED_MEMBERS_FILE="$OUTPUT_DIR/.failed_members.$$"
+TRANSFER_ATTEMPT_LOG="$OUTPUT_DIR/.ftget_attempt.$$"
 : > "$FAILED_MEMBERS_FILE"
-trap 'rm -f "$FAILED_MEMBERS_FILE"' EXIT
+trap 'rm -f "$FAILED_MEMBERS_FILE" "$TRANSFER_ATTEMPT_LOG"' EXIT
 
 command -v ftget >/dev/null 2>&1 || {
     log "ERROR: ftget not found. Run this script on a Belenos transfert node after 'module load hpss/1.0'."
@@ -64,7 +69,16 @@ while IFS=$'\t' read -r rem_file loc_file; do
         continue
     fi
     attempt=1
-    while ! ftget "$rem_file" "$OUTPUT_DIR/$loc_file"; do
+    while true; do
+        if ftget "$rem_file" "$OUTPUT_DIR/$loc_file" > "$TRANSFER_ATTEMPT_LOG" 2>&1; then
+            cat "$TRANSFER_ATTEMPT_LOG"
+            break
+        fi
+        cat "$TRANSFER_ATTEMPT_LOG"
+        if is_connectivity_error "$TRANSFER_ATTEMPT_LOG"; then
+            log "ERROR: Hendrix connectivity failure while transferring $loc_file."
+            exit 2
+        fi
         if [ "$attempt" -ge "$RETRIES" ]; then
             rm -f "$OUTPUT_DIR/$loc_file"
             if [ -n "$FAILED_FILE" ]; then

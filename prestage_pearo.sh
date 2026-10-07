@@ -36,6 +36,10 @@ die() {
     exit 1
 }
 
+is_connectivity_error() {
+    grep -Eqi 'No route to host|Network is unreachable|Connection (refused|timed out|reset)|connect.*return (101|111|113)' "$1"
+}
+
 retry_cmd() {
     local tries="$1"
     shift
@@ -108,6 +112,9 @@ collect_pending_paths() {
     while IFS= read -r chunk_file; do
         [ -n "$chunk_file" ] || continue
         if ! retry_cmd "$RETRIES" hfstat -f "$chunk_file" >> "$raw_status"; then
+            if is_connectivity_error "$raw_status"; then
+                die "Hendrix connectivity failure while running hfstat."
+            fi
             if [ "$CONTINUE_ON_ERROR" -eq 0 ]; then
                 return 1
             fi
@@ -245,6 +252,9 @@ while true; do
         while IFS= read -r chunk_file; do
             [ -n "$chunk_file" ] || continue
             if ! retry_cmd "$RETRIES" hstage -a -f "$chunk_file" > "$chunk_file.hstage.log" 2>&1; then
+                if is_connectivity_error "$chunk_file.hstage.log"; then
+                    die "Hendrix connectivity failure while running hstage."
+                fi
                 if [ "$CONTINUE_ON_ERROR" -eq 0 ]; then
                     die "hstage failed for $chunk_file"
                 fi
