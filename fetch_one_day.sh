@@ -45,6 +45,9 @@ done
 
 mkdir -p "$OUTPUT_DIR"
 [ -z "$FAILED_FILE" ] || : > "$FAILED_FILE"
+FAILED_MEMBERS_FILE="$OUTPUT_DIR/.failed_members.$$"
+: > "$FAILED_MEMBERS_FILE"
+trap 'rm -f "$FAILED_MEMBERS_FILE"' EXIT
 
 command -v ftget >/dev/null 2>&1 || {
     log "ERROR: ftget not found. Run this script on a Belenos transfert node after 'module load hpss/1.0'."
@@ -55,6 +58,11 @@ log "Using ftget"
 while IFS=$'\t' read -r rem_file loc_file; do
     [ -n "${rem_file:-}" ] || continue
     [ -n "${loc_file:-}" ] || continue
+    member_tag="${loc_file%%_*}"
+    if grep -qx "$member_tag" "$FAILED_MEMBERS_FILE"; then
+        log "Skipping $loc_file: $member_tag already failed."
+        continue
+    fi
     attempt=1
     while ! ftget "$rem_file" "$OUTPUT_DIR/$loc_file"; do
         if [ "$attempt" -ge "$RETRIES" ]; then
@@ -62,6 +70,7 @@ while IFS=$'\t' read -r rem_file loc_file; do
             if [ -n "$FAILED_FILE" ]; then
                 printf '%s\t%s\n' "$rem_file" "$loc_file" >> "$FAILED_FILE"
             fi
+            printf '%s\n' "$member_tag" >> "$FAILED_MEMBERS_FILE"
             if [ "$CONTINUE_ON_ERROR" -eq 0 ]; then
                 exit 1
             fi

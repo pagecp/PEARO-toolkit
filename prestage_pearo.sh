@@ -74,6 +74,29 @@ extract_hendrix_paths() {
     ' "$input_file" | sort -u > "$output_file"
 }
 
+member_tag_from_path() {
+    sed -n 's|.*\/\(mb[0-9][0-9][0-9]\)\/.*|\1|p' <<< "$1"
+}
+
+exclude_failed_members() {
+    local input_file="$1"
+    local excluded_members="$2"
+    local output_file="$3"
+
+    awk '
+        FNR == NR { excluded[$1] = 1; next }
+        {
+            if (match($0, /\/mb[0-9][0-9][0-9]\//) != 0) {
+                member = substr($0, RSTART + 1, 5)
+                if (member in excluded) {
+                    next
+                }
+            }
+            print
+        }
+    ' "$excluded_members" "$input_file" > "$output_file"
+}
+
 collect_pending_paths() {
     local input_file="$1"
     local output_file="$2"
@@ -182,10 +205,12 @@ MANIFEST_ALL="$WORKDIR/all_paths.txt"
 MANIFEST_PENDING="$WORKDIR/pending_paths.txt"
 RAW_STATUS="$WORKDIR/hfstat_latest.txt"
 FAILED_PATHS="$WORKDIR/failed_paths.txt"
+FAILED_MEMBERS="$WORKDIR/failed_members.txt"
 
 extract_hendrix_paths "$LOF_FILE" "$MANIFEST_ALL"
 cp "$MANIFEST_ALL" "$MANIFEST_PENDING"
 : > "$FAILED_PATHS"
+: > "$FAILED_MEMBERS"
 
 TOTAL_FILES="$(wc -l < "$MANIFEST_ALL" | tr -d ' ')"
 [ "$TOTAL_FILES" -gt 0 ] || die "No Hendrix path found in $LOF_FILE"
@@ -226,11 +251,17 @@ while true; do
 
                 while IFS= read -r path; do
                     [ -n "$path" ] || continue
+                    member_tag="$(member_tag_from_path "$path")"
+                    if [ -n "$member_tag" ] && grep -qx "$member_tag" "$FAILED_MEMBERS"; then
+                        log "Skipping remaining files for $member_tag after a failed prestage."
+                        continue
+                    fi
                     single_path_file="$WORKDIR/single_path.txt"
                     printf '%s\n' "$path" > "$single_path_file"
                     if ! retry_cmd "$RETRIES" hstage -a -f "$single_path_file" \
                         >> "$chunk_file.hstage.log" 2>&1; then
                         printf '%s\n' "$path" >> "$FAILED_PATHS"
+                        [ -z "$member_tag" ] || printf '%s\n' "$member_tag" >> "$FAILED_MEMBERS"
                     fi
                 done < "$chunk_file"
             fi
@@ -240,6 +271,9 @@ while true; do
     fi
 
     sort -u "$FAILED_PATHS" -o "$FAILED_PATHS"
+    sort -u "$FAILED_MEMBERS" -o "$FAILED_MEMBERS"
+    exclude_failed_members "$MANIFEST_PENDING" "$FAILED_MEMBERS" "$WORKDIR/pending_recoverable.txt"
+    mv "$WORKDIR/pending_recoverable.txt" "$MANIFEST_PENDING"
     comm -23 "$MANIFEST_PENDING" "$FAILED_PATHS" > "$WORKDIR/pending_stageable.txt"
     mv "$WORKDIR/pending_stageable.txt" "$MANIFEST_PENDING"
 
